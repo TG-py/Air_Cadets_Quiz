@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAFAC Questions</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/static/favicon-32x32.png" sizes="32x32" type="image/png">
+    <link rel="icon" href="/static/favicon-16x16.png" sizes="16x16" type="image/png">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="site-header">
+        <h1 class="title-row">
+            <svg class="roundel" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                <circle cx="50" cy="50" r="48" fill="#1f5fbf"/>
+                <circle cx="50" cy="50" r="34" fill="#ffffff"/>
+                <circle cx="50" cy="50" r="20" fill="#c8102e"/>
+            </svg>
+            <span>RAFAC Questions</span>
+            <svg class="roundel" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                <circle cx="50" cy="50" r="48" fill="#1f5fbf"/>
+                <circle cx="50" cy="50" r="34" fill="#ffffff"/>
+                <circle cx="50" cy="50" r="20" fill="#c8102e"/>
+            </svg>
+        </h1>
+    </header>
+
+    <button type="button" class="menu-toggle" id="menu-toggle"
+            aria-controls="side-menu" aria-expanded="false">Menu</button>
+    <div class="menu-overlay" id="menu-overlay" hidden></div>
+    <aside class="side-menu" id="side-menu" aria-label="Main menu">
+        <div class="side-menu-head">
+            <span class="side-menu-title">Menu</span>
+            <button type="button" class="side-menu-close" id="menu-close"
+                    aria-label="Close menu">&times;</button>
+        </div>
+        <nav class="main-nav" id="main-nav" hidden>
+            <button type="button" class="nav-btn staff-only" data-view="quiz">Ask questions</button>
+            <button type="button" class="nav-btn hide-for-admin" data-view="submit">Submit a question</button>
+            <button type="button" class="nav-btn staff-only" data-view="stats">Progress</button>
+            <button type="button" class="nav-btn admin-only" data-view="review" hidden>Review <span id="review-badge" class="badge" hidden>0</span></button>
+            <button type="button" class="nav-btn admin-only" data-view="bank" hidden>Question bank</button>
+            <button type="button" class="nav-btn admin-only" data-view="users" hidden>Staff/NCO accounts</button>
+        </nav>
+        <div class="session-bar" id="session-bar">
+            <span id="who"></span>
+            <button type="button" class="link-btn" id="login-link">Staff/NCO login</button>
+            <button type="button" class="link-btn" id="change-password-btn" hidden>Change password</button>
+            <button type="button" class="link-btn" id="logout-btn" hidden>Log out</button>
+        </div>
+    </aside>
+
+    <p class="banner banner-error" id="global-error" hidden></p>
+    <p class="banner banner-ok" id="global-ok" hidden></p>
+
+    <main>
+        <section class="view" id="view-login" hidden>
+            <h2>Log in</h2>
+            <form class="card form" id="login-form" autocomplete="on">
+                <label for="login-username">Username</label>
+                <input type="text" id="login-username" name="username" autocomplete="username" required>
+                <label for="login-password">Password</label>
+                <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+                <button type="submit" class="primary">Log in</button>
+            </form>
+            <p class="hint">Cadets do not need an account - use <strong>Submit a question</strong> instead.</p>
+        </section>
+
+        <section class="view" id="view-quiz" hidden>
+            <div class="quiz-toolbar">
+                <label class="inline-label" for="quiz-topic">Topic</label>
+                <select id="quiz-topic">
+                    <option value="">All topics</option>
+                </select>
+                <span class="toolbar-spacer"></span>
+                <span class="muted" id="quiz-progress"></span>
+            </div>
+
+            <div id="quiz-panel">
+                <div class="card question-card">
+                    <p class="topic-tag" id="question-topic"></p>
+                    <h2 id="question-text">Loading...</h2>
+                    <div class="answer-block" id="answer-block" hidden>
+                        <p class="answer-label">Answer</p>
+                        <p id="answer-text"></p>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button type="button" class="primary" id="correct-btn">Correct</button>
+                    <button type="button" class="danger" id="incorrect-btn">Incorrect</button>
+                    <button type="button" class="ghost ghost-warn" id="skip-btn">Skip</button>
+                    <button type="button" class="ghost" id="reveal-btn">Show answer</button>
+                    <button type="button" class="ghost ghost-accent" id="finish-btn">Finish</button>
+                </div>
+            </div>
+
+            <div class="card" id="quiz-empty" hidden>
+                <h2 id="quiz-empty-title">No questions to ask yet</h2>
+                <p class="muted" id="quiz-empty-text"></p>
+            </div>
+
+            <div class="card" id="quiz-summary" hidden>
+                <h2>Session summary</h2>
+                <p id="summary-text"></p>
+                <div class="controls">
+                    <button type="button" class="primary" id="summary-restart">Ask another</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="view" id="view-submit" hidden>
+            <h2>Submit a question</h2>
+            <p class="hint">An instructor reviews every question before it joins the quiz. All four boxes are required.</p>
+            <form class="card form" id="submit-form">
+                <label for="submit-name">Your name</label>
+                <input type="text" id="submit-name" maxlength="80" autocomplete="name" required>
+                <label for="submit-question">Question</label>
+                <textarea id="submit-question" rows="4" maxlength="2000" required></textarea>
+                <label for="submit-answer">Answer</label>
+                <textarea id="submit-answer" rows="3" maxlength="2000" required></textarea>
+                <label for="submit-topic">Topic</label>
+                <select id="submit-topic" required></select>
+                <input type="text" id="submit-topic-new" maxlength="80" placeholder="Name of the new topic" hidden>
+                <button type="submit" class="primary">Send for review</button>
+            </form>
+        </section>
+
+        <section class="view" id="view-stats" hidden>
+            <h2>Progress</h2>
+            <h3 class="section-label">Squadron overall</h3>
+            <div class="stat-row" id="overall-stats"></div>
+            <h3 class="section-label">By topic</h3>
+            <p class="hint text-box">Open a topic to see each individual question.</p>
+            <div class="accordion" id="stats-topics"></div>
+            <p class="muted text-box" id="stats-empty" hidden>No questions have been asked yet.</p>
+            <div class="danger-zone admin-only" hidden>
+                <h3 class="section-label">Delete all progress</h3>
+                <p class="hint text-box">
+                    Removes every recorded answer for the whole squadron. Questions, staff/NCO accounts and
+                    the question bank are left untouched. This cannot be undone.
+                </p>
+                <button type="button" class="no" id="reset-progress-btn">Delete all progress</button>
+            </div>
+        </section>
+
+        <section class="view" id="view-review" hidden>
+            <h2>Review submitted questions</h2>
+            <p class="hint text-box" id="review-summary"></p>
+            <ul class="question-list" id="review-list"></ul>
+            <p class="muted text-box" id="review-empty" hidden>Nothing waiting for review.</p>
+        </section>
+
+        <section class="view" id="view-bank" hidden>
+            <h2>Question bank</h2>
+            <form class="card form" id="add-question-form">
+                <label for="bank-question">Add a question</label>
+                <textarea id="bank-question" rows="3" maxlength="2000" required placeholder="Question"></textarea>
+                <textarea id="bank-answer" rows="2" maxlength="2000" placeholder="Answer"></textarea>
+                <select id="bank-topic" aria-label="Topic" required></select>
+                <input type="text" id="bank-topic-new" maxlength="80" placeholder="Name of the new topic" hidden>
+                <button type="submit" class="primary">Add to bank</button>
+            </form>
+
+            <form class="card form" id="import-form">
+                <label for="import-format">Import your question list</label>
+                <select id="import-format">
+                    <option value="csv">CSV - question, answer, topic</option>
+                    <option value="json">JSON - list of questions</option>
+                </select>
+                <textarea id="import-content" rows="6" placeholder="question,answer,topic&#10;What is the RAF motto?,Per Ardua ad Astra,Motto"></textarea>
+                <button type="submit" class="primary">Import</button>
+            </form>
+
+            <div class="bank-filters">
+                <input type="search" id="bank-search" placeholder="Search questions..." aria-label="Search questions">
+            </div>
+            <div id="bank-list"></div>
+        </section>
+
+        <section class="view" id="view-users" hidden>
+            <h2>Staff/NCO accounts</h2>
+            <p class="hint text-box">
+                Usernames and passwords are managed here. Passwords are shown once, when you set them, and
+                stored only as a hash. If one is lost, set a new one.
+            </p>
+            <form class="card form" id="user-form">
+                <label for="user-username">Username</label>
+                <input type="text" id="user-username" maxlength="32" required>
+                <label for="user-display">Display name <span class="optional">(optional)</span></label>
+                <input type="text" id="user-display" maxlength="80">
+                <label for="user-password">Password</label>
+                <input type="password" id="user-password" minlength="8" required>
+                <label for="user-role">Role</label>
+                <select id="user-role">
+                    <option value="staff">NCO / staff - ask questions</option>
+                    <option value="admin">Admin - full control</option>
+                </select>
+                <button type="submit" class="primary">Create account</button>
+            </form>
+            <ul class="question-list" id="user-list"></ul>
+        </section>
+
+        <section class="view" id="view-password" hidden>
+            <h2>Change password</h2>
+            <form class="card form" id="password-form" autocomplete="off">
+                <label for="current-password">Current password</label>
+                <input type="password" id="current-password" autocomplete="current-password" required>
+                <label for="new-password">New password</label>
+                <input type="password" id="new-password" minlength="8" autocomplete="new-password" required>
+                <label for="confirm-password">Confirm new password</label>
+                <input type="password" id="confirm-password" minlength="8" autocomplete="new-password" required>
+                <button type="submit" class="primary">Change password</button>
+            </form>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

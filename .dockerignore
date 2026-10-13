@@ -1,0 +1,12 @@
+Dockerfile
+docker-compose.yml
+.dockerignore
+README.md
+test_quiz.py
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+.env
+.env.example

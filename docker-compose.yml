@@ -1,0 +1,18 @@
+services:
+  air-cadets-quiz:
+    build: .
+    image: air-cadets-quiz
+    container_name: air-cadets-quiz
+    ports:
+      - "8001:8001"
+    environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in a .env file next to this compose file}
+      QUIZ_SECURE_COOKIES: ${QUIZ_SECURE_COOKIES:-0}
+      QUIZ_LOG: ${QUIZ_LOG:-0}
+    volumes:
+      - quiz-data:/srv/data
+    restart: unless-stopped
+
+volumes:
+  quiz-data:

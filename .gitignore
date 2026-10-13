@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+
+questions.db
+questions.db-wal
+questions.db-shm
+*.db
+*.db-wal
+*.db-shm
+
+.env
