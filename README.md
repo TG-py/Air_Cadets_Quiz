@@ -21,7 +21,7 @@ No external dependencies. Python 3.9+ standard library and SQLite only.
 | --- | --- |
 | Cadet (no login) | Submit new questions on the Submit page, pick an existing topic or add a new one |
 | NCO / staff | Log in, ask questions, record correct/incorrect or skip, add questions directly, see progress |
-| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, delete all progress |
+| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, archive and restore accepted questions, permanently delete questions and their history, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, delete all progress |
 
 Only staff/NCO and admins can see questions or record answers - cadets get a 401 on
 those endpoints. Cadets see the Submit page and nothing else.
@@ -119,6 +119,12 @@ The *Progress* page is built in three layers:
    was asked, how often the squad got it right or wrong, and its accuracy.
 
 That is the page to look at when deciding what to drill next week.
+
+Admins can archive an accepted question from the question bank. Archived
+questions are removed from the quiz but keep their answer history; restoring
+one puts it back into the quiz with that history intact. Permanent deletion is
+separate and removes the question's recorded attempts and their references in
+quiz sessions.
 
 ## Quiz sessions
 

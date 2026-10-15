@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -28,10 +29,27 @@ def check(name, condition, detail=""):
 
 def remove_db(path):
     for suffix in ("", "-wal", "-shm"):
-        try:
-            os.remove(path + suffix)
-        except FileNotFoundError:
-            pass
+        for _ in range(20):
+            try:
+                os.remove(path + suffix)
+                break
+            except FileNotFoundError:
+                break
+            except PermissionError:
+                time.sleep(0.1)
+        else:
+            raise PermissionError("could not remove database file: %s" % (path + suffix))
+
+
+def close_test_db_pool():
+    module = sys.modules.get("db")
+    if not module:
+        return
+    with module._pool_lock:
+        connections = list(module._pool)
+        module._pool.clear()
+    for conn in connections:
+        conn.close()
 
 
 class Client:
@@ -119,6 +137,7 @@ def main():
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+        close_test_db_pool()
         remove_db(DB)
 
     print("\n%d passed, %d failed" % (len(passed), len(failed)))
@@ -617,6 +636,119 @@ def run_tests():
     status, payload, _ = admin.get("/api/questions?status=pending")
     check("deleted question gone", all(q["id"] != target["id"] for q in payload["questions"]))
 
+    print("\n[19a] archive, restore and permanently delete question history")
+    archive_staff = Client()
+    status, payload, _ = archive_staff.get("/api/auth/me")
+    archive_staff.csrf = payload.get("csrf")
+    status, payload, _ = archive_staff.post(
+        "/api/auth/login", {"username": "nco1", "password": "newpass12345"}
+    )
+    archive_staff.csrf = payload.get("csrf")
+    check("staff login for archive checks", status == 200, str(payload))
+    status, payload, _ = admin.post(
+        "/api/questions",
+        {"question_text": "Archive workflow question", "answer_text": "kept answer",
+         "topic": "Archive checks"},
+    )
+    archive_id = payload.get("id")
+    check("admin can add archive test question", status == 200 and archive_id is not None, str(payload))
+    status, attempt, _ = archive_staff.post(
+        "/api/attempts", {"question_id": archive_id, "correct": True}
+    )
+    session_id = attempt.get("quiz_session_id")
+    check("test question has recorded history", status == 200 and session_id is not None, str(attempt))
+    status, payload, _ = archive_staff.post(
+        "/api/admin/questions/%d/archive" % archive_id, {}
+    )
+    check("staff cannot archive questions", status == 403, str(status))
+    status, payload, _ = archive_staff.get("/api/questions?include_archived=1")
+    check("staff cannot view archived questions", status == 403, str(status))
+    status, payload, _ = admin.post(
+        "/api/admin/questions/%d/archive" % archive_id, {}
+    )
+    check("admin can archive accepted questions", status == 200, str(payload))
+    status, payload, _ = admin.get("/api/questions?status=approved")
+    check("archived question is excluded from active bank", all(
+        q["id"] != archive_id for q in payload["questions"]
+    ))
+    status, payload, _ = admin.get("/api/questions?include_archived=1")
+    archived = [q for q in payload["questions"] if q["id"] == archive_id]
+    check("admin can view archived question", bool(archived) and bool(archived[0]["archived_at"]))
+    status, payload, _ = archive_staff.post(
+        "/api/attempts", {"question_id": archive_id, "correct": True}
+    )
+    check("archived question cannot receive new attempts", status == 400, str(status))
+    status, payload, _ = archive_staff.post("/api/quiz/finish", {})
+    check("history session can be finished", status == 200, str(payload))
+    status, payload, _ = admin.get("/api/admin/quiz-sessions/%d" % session_id)
+    check("archive keeps historical attempt", status == 200 and any(
+        a["question_id"] == archive_id for a in payload.get("attempts", [])
+    ))
+    status, payload, _ = admin.post(
+        "/api/admin/questions/%d/restore" % archive_id, {}
+    )
+    check("admin can restore archived question", status == 200, str(payload))
+    status, payload, _ = admin.get("/api/questions?status=approved")
+    check("restored question returns to active bank", any(
+        q["id"] == archive_id for q in payload["questions"]
+    ))
+    status, payload, _ = admin.post(
+        "/api/admin/questions/%d/delete" % archive_id, {}
+    )
+    check("admin can permanently delete restored question", status == 200, str(payload))
+    status, payload, _ = admin.get("/api/admin/quiz-sessions/%d" % session_id)
+    check("permanent deletion removes historical attempt references", status == 200 and all(
+        a["question_id"] != archive_id for a in payload.get("attempts", [])
+    ))
+
+    print("\n[19b] upgrade an existing database for archiving")
+    legacy_db = os.path.join(ROOT, "test_legacy_archive.db")
+    remove_db(legacy_db)
+    legacy_conn = sqlite3.connect(legacy_db)
+    legacy_conn.executescript("""
+        CREATE TABLE users (id INTEGER PRIMARY KEY);
+        CREATE TABLE questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_text TEXT NOT NULL,
+            answer_text TEXT NOT NULL DEFAULT '',
+            topic TEXT NOT NULL DEFAULT 'General',
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'approved', 'rejected')),
+            submitted_by TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'staff',
+            review_note TEXT NOT NULL DEFAULT '',
+            reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            reviewed_at TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+            correct INTEGER NOT NULL DEFAULT 0 CHECK (correct IN (0, 1)),
+            skipped INTEGER NOT NULL DEFAULT 0 CHECK (skipped IN (0, 1)),
+            answered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO questions (question_text, answer_text, topic, status, created_at)
+            VALUES ('Legacy question', 'Legacy answer', 'Legacy topic', 'approved', '2025-01-01');
+        INSERT INTO attempts (question_id, correct, created_at)
+            VALUES (1, 1, '2025-01-02');
+    """)
+    legacy_conn.close()
+    previous_db_path = dbmod.DB_PATH
+    try:
+        dbmod.DB_PATH = legacy_db
+        dbmod.init()
+        legacy_conn = sqlite3.connect(legacy_db)
+        columns = {row[1] for row in legacy_conn.execute("PRAGMA table_info(questions)")}
+        attempt_count = legacy_conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
+        legacy_conn.close()
+    finally:
+        dbmod.DB_PATH = previous_db_path
+        remove_db(legacy_db)
+    check("old question tables gain the archive field", "archived_at" in columns)
+    check("old attempts survive the archive migration", attempt_count == 1, str(attempt_count))
+
     print("\n[20] no name needed when adding from the bank")
     status, payload, _ = admin.post(
         "/api/questions",
@@ -869,7 +1001,7 @@ console.log("BAD:" + collect(bad, []).join(","));
           '<div id="bank-list">' in index_html, "expected a div host for the groups")
     check("bank group styles are defined", ".bank-group" in css, "no .bank-group rule")
     check("each status gets its own accent colour",
-          all(('data-status="%s"' % s) in css for s in ("pending", "approved", "rejected")),
+          all(('data-status="%s"' % s) in css for s in ("pending", "approved", "rejected", "archived")),
           "missing data-status rule in the css")
     check("groups are tagged for the accent colours",
           "section.dataset.status = group.value" in app_js, "group not tagged with its status")
@@ -907,6 +1039,8 @@ global.document = { createElement: makeEl };
 // the action handlers are referenced by name, so stub them
 function reviewFromBank() {}
 function deleteQuestion() {}
+function archiveQuestion() {}
+function restoreQuestion() {}
 function editQuestion() {}
 function renameTopic() {}
 // an admin sees the rename control on every topic group
@@ -922,6 +1056,7 @@ const BANK_GROUPS = [
     { value: "pending", label: "Pending" },
     { value: "approved", label: "Accepted" },
     { value: "rejected", label: "Rejected" },
+    { value: "archived", label: "Archived" },
 ];
 function findAll(node, pred, acc) {
     acc = acc || [];
@@ -935,10 +1070,14 @@ const questions = [
     { id: 3, question_text: "a0", answer_text: "a", topic: "Motto", status: "approved" },
     { id: 4, question_text: "a1", answer_text: "a", topic: "Motto", status: "approved" },
     { id: 5, question_text: "r1", answer_text: "a", topic: "Ranks", status: "rejected" },
+    { id: 6, question_text: "a2", answer_text: "a", topic: "Archive checks", status: "approved",
+      archived_at: "2026-10-15T12:00:00+00:00" },
 ];
 const out = [];
 BANK_GROUPS.forEach((group) => {
-    const items = questions.filter((q) => q.status === group.value);
+    const items = group.value === "archived"
+        ? questions.filter((q) => q.archived_at)
+        : questions.filter((q) => !q.archived_at && q.status === group.value);
     const section = bankStatusGroup(group, items);
     const topics = findAll(section, (n) => n.className === "topic-name").map((n) => n.textContent);
     const count = findAll(section, (n) => n.className === "muted").map((n) => n.textContent);
@@ -961,6 +1100,7 @@ const base = { question_text: "q", answer_text: "a", topic: "T" };
 console.log("PENDINGBTNS:" + buttons({ id: 1, status: "pending" }));
 console.log("APPROVEDBTNS:" + buttons({ id: 2, status: "approved" }));
 console.log("REJECTEDBTNS:" + buttons({ id: 3, status: "rejected" }));
+console.log("ARCHIVEDBTNS:" + buttons({ id: 4, status: "approved", archived_at: "2026-10-15" }));
 console.log("EDITWIRING:" + /makeButton\("Edit", "", \(\) => editQuestion\(question\)\)/.test(src));
 """
     bank_path = os.path.join(ROOT, "static", "_bank_check.js")
@@ -982,7 +1122,8 @@ console.log("EDITWIRING:" + /makeButton\("Edit", "", \(\) => editQuestion\(quest
           bool(groups_line) and groups_line[0] == (
               "GROUPS:Pending:pending:Doctrine|Motto: (2):2 "
               "Accepted:approved:Motto: (2):2 "
-              "Rejected:rejected:Ranks: (1):1"
+              "Rejected:rejected:Ranks: (1):1 "
+              "Archived:archived:Archive checks: (1):1"
           ),
           groups_line[0] if groups_line else bank_out[:300])
     empty_line = [l for l in bank_out.splitlines() if l.startswith("EMPTY:")]
@@ -990,14 +1131,17 @@ console.log("EDITWIRING:" + /makeButton\("Edit", "", \(\) => editQuestion\(quest
           bool(empty_line) and empty_line[0] == "EMPTY:0:1:1", empty_line[0] if empty_line else "no EMPTY line")
 
     buttons = {l.split(":", 1)[0]: l.split(":", 1)[1] for l in bank_out.splitlines()
-               if l.split(":", 1)[0] in ("PENDINGBTNS", "APPROVEDBTNS", "REJECTEDBTNS", "EDITWIRING")}
+               if l.split(":", 1)[0] in ("PENDINGBTNS", "APPROVEDBTNS", "REJECTEDBTNS", "ARCHIVEDBTNS", "EDITWIRING")}
     check("a pending question in the bank can be accepted, edited and deleted",
           buttons.get("PENDINGBTNS") == "Accept,Edit,Delete", buttons.get("PENDINGBTNS", "none"))
-    check("an accepted question in the bank can be edited, removed and deleted",
-          buttons.get("APPROVEDBTNS") == "Remove from quiz,Edit,Delete",
+    check("an accepted question in the bank can be removed, archived, edited and deleted",
+          buttons.get("APPROVEDBTNS") == "Remove from quiz,Archive,Edit,Delete",
           buttons.get("APPROVEDBTNS", "none"))
     check("a rejected question in the bank can be accepted, edited and deleted",
           buttons.get("REJECTEDBTNS") == "Accept,Edit,Delete", buttons.get("REJECTEDBTNS", "none"))
+    check("an archived question in the bank can be restored, edited and deleted",
+          buttons.get("ARCHIVEDBTNS") == "Restore to quiz,Edit,Delete",
+          buttons.get("ARCHIVEDBTNS", "none"))
     check("the bank edit button calls the edit handler",
           buttons.get("EDITWIRING") == "true", buttons.get("EDITWIRING", "none"))
 
@@ -1296,7 +1440,7 @@ loadUsers().then(() => {
     // re-introduce the original bug to prove this harness would have caught it
     const buggy = grab("loadUsers")
         .replace("function loadUsers(", "function loadUsersBuggy(")
-        .replace(/const actions = document\.createElement\("div"\);\n(\s*)actions\.className = "q-actions";\n\s*if \(user\.id !== state\.user\.id\) \{/,
+        .replace(/const actions = document\.createElement\("div"\);\r?\n([ \t]*)actions\.className = "q-actions";\r?\n[ \t]*if \(user\.id !== state\.user\.id\) \{/,
                  '$1if (user.id !== state.user.id) {\n$1    const actions = document.createElement("div");\n$1    actions.className = "q-actions";')
         .replace("if (actions.children.length) item.appendChild(actions);", "item.appendChild(actions);");
     if (buggy.indexOf("const actions") < 0 || buggy.indexOf("actions.children.length") >= 0) {

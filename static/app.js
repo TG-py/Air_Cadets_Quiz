@@ -419,7 +419,9 @@ function questionListItem(question, options = {}) {
     const meta = document.createElement("div");
     meta.className = "q-meta";
     if (question.topic) meta.appendChild(chip(question.topic, ""));
-    if (question.status) {
+    if (question.archived_at) {
+        meta.appendChild(chip("archived", "chip-archived"));
+    } else if (question.status) {
         meta.appendChild(chip(question.status, "chip-" + question.status));
     }
     if (question.submitted_by) {
@@ -456,14 +458,20 @@ function questionListItem(question, options = {}) {
 // the actions shown against every question in the bank
 function questionActions(question) {
     return (_item, actions) => {
-        if (question.status === "pending" || question.status === "rejected") {
+        if (question.archived_at) {
+            actions.appendChild(
+                makeButton("Restore to quiz", "ok", () => restoreQuestion(question.id))
+            );
+        } else if (question.status === "pending" || question.status === "rejected") {
             actions.appendChild(
                 makeButton("Accept", "ok", () => reviewFromBank(question.id, "approve"))
             );
-        }
-        if (question.status === "approved") {
+        } else if (question.status === "approved") {
             actions.appendChild(
                 makeButton("Remove from quiz", "no", () => reviewFromBank(question.id, "reject"))
+            );
+            actions.appendChild(
+                makeButton("Archive", "no", () => archiveQuestion(question.id))
             );
         }
         actions.appendChild(makeButton("Edit", "", () => editQuestion(question)));
@@ -623,7 +631,9 @@ async function editQuestion(question) {
 }
 
 async function deleteQuestion(questionId) {
-    if (!window.confirm("Delete this question permanently?")) return;
+    if (!window.confirm(
+        "Delete this question permanently? Its recorded attempts and quiz-history entries will also be removed."
+    )) return;
     try {
         const payload = await api("/api/admin/questions/" + questionId + "/delete", {
             method: "POST",
@@ -642,6 +652,7 @@ const BANK_GROUPS = [
     { value: "pending", label: "Pending" },
     { value: "approved", label: "Accepted" },
     { value: "rejected", label: "Rejected" },
+    { value: "archived", label: "Archived" },
 ];
 
 // remember which topic groups the admin has opened, so accepting or deleting
@@ -736,6 +747,7 @@ async function loadBank() {
     const list = el("bank-list");
     const search = el("bank-search").value.trim();
     const params = new URLSearchParams();
+    params.set("include_archived", "1");
     if (search) params.set("q", search);
     try {
         const payload = await api("/api/questions?" + params.toString());
@@ -754,7 +766,11 @@ async function loadBank() {
             list.appendChild(
                 bankStatusGroup(
                     group,
-                    payload.questions.filter((q) => q.status === group.value)
+                    payload.questions.filter((q) =>
+                        group.value === "archived"
+                            ? Boolean(q.archived_at)
+                            : !q.archived_at && q.status === group.value
+                    )
                 )
             );
         });
@@ -772,6 +788,37 @@ async function reviewFromBank(questionId, status) {
         applyIdentity({ counts: payload.counts });
         showOk("Updated.");
         loadBank();
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function archiveQuestion(questionId) {
+    if (!window.confirm("Archive this question? It will leave the quiz, but its history will be kept.")) {
+        return;
+    }
+    try {
+        const payload = await api("/api/admin/questions/" + questionId + "/archive", {
+            method: "POST",
+            body: {},
+        });
+        applyIdentity({ counts: payload.counts });
+        showOk("Question archived. Its answer history has been kept.");
+        await loadBank();
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function restoreQuestion(questionId) {
+    try {
+        const payload = await api("/api/admin/questions/" + questionId + "/restore", {
+            method: "POST",
+            body: {},
+        });
+        applyIdentity({ counts: payload.counts });
+        showOk("Question restored to the quiz with its previous history.");
+        await loadBank();
     } catch (err) {
         showError(err.message);
     }

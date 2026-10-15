@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS questions (
     review_note   TEXT NOT NULL DEFAULT '',
     reviewed_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
     reviewed_at   TEXT,
+    archived_at   TEXT,
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS questions_status ON questions(status);
@@ -190,7 +191,7 @@ def ensure_quiz_session_schema(conn):
     ):
         if column not in existing:
             try:
-                conn.execute("ALTER TABLE attempts ADD COLUMN %s %s" % (column, ddl))
+                conn.execute(f"ALTER TABLE attempts ADD COLUMN {column} {ddl}")
             except sqlite3.Error:
                 pass
     conn.execute("CREATE INDEX IF NOT EXISTS attempts_quiz_session ON attempts(quiz_session_id)")
@@ -218,6 +219,14 @@ def init():
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
         conn.executescript(SCHEMA)
+        question_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(questions)")
+        }
+        if "archived_at" not in question_columns:
+            conn.execute("ALTER TABLE questions ADD COLUMN archived_at TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS questions_archived ON questions(archived_at)"
+        )
         drop_readable_passwords(conn)
         ensure_quiz_session_schema(conn)
         conn.execute("PRAGMA wal_autocheckpoint = 512")
@@ -305,9 +314,14 @@ def get_question(conn, question_id):
     return conn.execute("SELECT * FROM questions WHERE id = ?", (question_id,)).fetchone()
 
 
-def list_questions(conn, status=None, topic=None, search=None, limit=500, offset=0):
+def list_questions(
+    conn, status=None, topic=None, search=None, limit=500, offset=0,
+    include_archived=False,
+):
     sql = "SELECT * FROM questions WHERE 1 = 1"
     args = []
+    if not include_archived:
+        sql += " AND archived_at IS NULL"
     if status:
         sql += " AND status = ?"
         args.append(status)
@@ -340,6 +354,24 @@ def delete_question(conn, question_id):
     conn.execute("DELETE FROM questions WHERE id = ?", (question_id,))
 
 
+def archive_question(conn, question_id):
+    cur = conn.execute(
+        "UPDATE questions SET archived_at = ? "
+        "WHERE id = ? AND status = ? AND archived_at IS NULL",
+        (now(), question_id, Q_APPROVED),
+    )
+    return cur.rowcount
+
+
+def restore_question(conn, question_id):
+    cur = conn.execute(
+        "UPDATE questions SET archived_at = NULL "
+        "WHERE id = ? AND status = ? AND archived_at IS NOT NULL",
+        (question_id, Q_APPROVED),
+    )
+    return cur.rowcount
+
+
 def rename_topic(conn, old_topic, new_topic):
     """Move every question on one topic to another, across all statuses."""
     cur = conn.execute(
@@ -352,10 +384,10 @@ def rename_topic(conn, old_topic, new_topic):
 def question_counts(conn):
     row = conn.execute(
         "SELECT "
-        "COUNT(*) AS total, "
-        "SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved, "
-        "SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending, "
-        "SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected "
+        "SUM(CASE WHEN archived_at IS NULL THEN 1 ELSE 0 END) AS total, "
+        "SUM(CASE WHEN status = 'approved' AND archived_at IS NULL THEN 1 ELSE 0 END) AS approved, "
+        "SUM(CASE WHEN status = 'pending' AND archived_at IS NULL THEN 1 ELSE 0 END) AS pending, "
+        "SUM(CASE WHEN status = 'rejected' AND archived_at IS NULL THEN 1 ELSE 0 END) AS rejected "
         "FROM questions"
     ).fetchone()
     return {
@@ -372,7 +404,8 @@ def list_topics(conn, statuses=(Q_APPROVED,)):
     return [
         r["topic"]
         for r in conn.execute(
-            "SELECT DISTINCT topic FROM questions WHERE status IN (%s) "
+            "SELECT DISTINCT topic FROM questions WHERE archived_at IS NULL "
+            "AND status IN (%s) "
             "ORDER BY topic COLLATE NOCASE" % placeholders,
             tuple(statuses),
         )

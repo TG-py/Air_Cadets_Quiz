@@ -22,7 +22,7 @@ def read_text(path):
                 return handle.read()
         except UnicodeDecodeError:
             continue
-    raise SystemExit("could not decode %s, try re-saving it as utf-8" % path)
+    raise SystemExit(f"could not decode {path}, try re-saving it as utf-8")
 
 
 def first_value(item, keys):
@@ -83,7 +83,7 @@ def load_rows(path, fmt):
         try:
             return parse_json(text)
         except json.JSONDecodeError as exc:
-            raise SystemExit("invalid json in %s: %s" % (path, exc))
+            raise SystemExit(f"invalid json in {path}: {exc}")
     if fmt == "csv":
         return parse_delimited(text)
     stripped = text.lstrip()
@@ -137,8 +137,8 @@ def main():
     try:
         if args.dry_run:
             for question_text, answer_text, topic in rows:
-                print("- %s | %s | %s" % (question_text, answer_text, topic))
-            print("\n%d question(s) would be imported as '%s'." % (len(rows), status))
+                print(f"- {question_text} | {answer_text} | {topic}")
+            print(f"\n{len(rows)} question(s) would be imported as '{status}'.")
             return
 
         seen = set()
@@ -173,13 +173,13 @@ def main():
 
     with db.connection() as conn:
         counts = db.question_counts(conn)
-    print("Imported %d question(s) as '%s'." % (added, status))
-    print("  already in the bank: %d" % duplicates)
+    print(f"Imported {added} question(s) as '{status}'.")
+    print(f"  already in the bank: {duplicates}")
     if skipped_blank:
-        print("  no answer supplied:  %d" % skipped_blank)
+        print(f"  no answer supplied:  {skipped_blank}")
     print(
-        "  bank now holds %d approved, %d pending, %d rejected"
-        % (counts["approved"], counts["pending"], counts["rejected"])
+        f"  bank now holds {counts['approved']} approved, "
+        f"{counts['pending']} pending, {counts['rejected']} rejected"
     )
 
 

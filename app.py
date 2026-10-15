@@ -149,7 +149,7 @@ def api_next_question(ctx):
         if counts["approved"] == 0:
             raise ApiError(
                 HTTPStatus.CONFLICT,
-                "no approved questions yet%s" % (" - log in as admin and add some" if not ctx.user else ""),
+                f"no approved questions yet{' - log in as admin and add some' if not ctx.user else ''}",
                 "empty",
             )
         if not pool:
@@ -174,7 +174,7 @@ def api_record_attempt(ctx):
         raise bad_request("question_id must be a number")
 
     question = db.get_question(ctx.conn, question_id)
-    if not question or question["status"] != db.Q_APPROVED:
+    if not question or question["status"] != db.Q_APPROVED or question["archived_at"]:
         raise bad_request("unknown question")
 
     skipped = 1 if ctx.body.get("skipped") else 0
@@ -260,6 +260,7 @@ def question_json(row, include_private=True):
         "answer_text": row["answer_text"],
         "topic": row["topic"],
         "status": row["status"],
+        "archived_at": row["archived_at"],
         "created_at": row["created_at"],
     }
     if include_private:
@@ -278,6 +279,9 @@ def api_list_questions(ctx):
     if not ctx.user:
         raise ApiError(HTTPStatus.FORBIDDEN, "staff/NCO only")
     status = ctx.q("status") or None
+    include_archived = ctx.q("include_archived") == "1"
+    if include_archived and ctx.user["role"] != db.USER_ADMIN:
+        raise ApiError(HTTPStatus.FORBIDDEN, "only admins can view archived questions")
     if status and ctx.user["role"] != db.USER_ADMIN and status != db.Q_APPROVED:
         raise ApiError(HTTPStatus.FORBIDDEN, "only admins can review submissions")
     rows = db.list_questions(
@@ -285,6 +289,7 @@ def api_list_questions(ctx):
         status=status,
         topic=(ctx.q("topic") or "").strip() or None,
         search=(ctx.q("q") or "").strip() or None,
+        include_archived=include_archived,
     )
     return {
         "questions": [question_json(r) for r in rows],
@@ -309,7 +314,7 @@ def clean_field(ctx, key, label, minimum, maximum):
     if len(value) < minimum:
         raise bad_request("%s is too short" % label)
     if len(value) > maximum:
-        raise bad_request("%s is too long (max %d characters)" % (label, maximum))
+        raise bad_request(f"{label} is too long (max {maximum} characters)")
     return value
 
 
@@ -358,7 +363,8 @@ def api_review(ctx):
     if status not in ("approve", "reject"):
         raise bad_request("unknown review action")
     question_id = int(ctx.match.group("id"))
-    if not db.get_question(ctx.conn, question_id):
+    question = db.get_question(ctx.conn, question_id)
+    if not question or question["archived_at"]:
         raise ApiError(HTTPStatus.NOT_FOUND, "question not found")
     note = (ctx.body.get("note") or "").strip()[:300]
     db.review_question(
@@ -376,6 +382,23 @@ def api_delete_question(ctx):
     if not db.get_question(ctx.conn, question_id):
         raise ApiError(HTTPStatus.NOT_FOUND, "question not found")
     db.delete_question(ctx.conn, question_id)
+    return {"ok": True, "counts": db.question_counts(ctx.conn)}
+
+
+def api_archive_question(ctx):
+    question_id = int(ctx.match.group("id"))
+    if not db.archive_question(ctx.conn, question_id):
+        raise ApiError(
+            HTTPStatus.CONFLICT,
+            "only an accepted question can be archived",
+        )
+    return {"ok": True, "counts": db.question_counts(ctx.conn)}
+
+
+def api_restore_question(ctx):
+    question_id = int(ctx.match.group("id"))
+    if not db.restore_question(ctx.conn, question_id):
+        raise ApiError(HTTPStatus.CONFLICT, "question is not archived")
     return {"ok": True, "counts": db.question_counts(ctx.conn)}
 
 
@@ -426,7 +449,7 @@ def parse_import(text, fmt):
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise bad_request("invalid json: %s at line %d" % (exc.msg, exc.lineno))
+            raise bad_request(f"invalid json: {exc.msg} at line {exc.lineno}")
         if isinstance(data, dict):
             data = data.get("questions", data.get("data", []))
         if not isinstance(data, list):
@@ -501,7 +524,7 @@ def import_questions(ctx):
         "added": added,
         "duplicates": duplicates,
         "counts": db.question_counts(ctx.conn),
-        "message": "imported %d questions (%d already existed)" % (added, duplicates),
+        "message": f"imported {added} questions ({duplicates} already existed)",
     }
 
 
@@ -694,6 +717,8 @@ ROUTES = [
     ("GET", r"^/api/admin/pending$", api_pending, "admin"),
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/(?P<status>approve|reject)$", api_review, "admin"),
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/delete$", api_delete_question, "admin"),
+    ("POST", r"^/api/admin/questions/(?P<id>\d+)/archive$", api_archive_question, "admin"),
+    ("POST", r"^/api/admin/questions/(?P<id>\d+)/restore$", api_restore_question, "admin"),
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/edit$", api_edit_question, "admin"),
     ("POST", r"^/api/admin/import$", import_questions, "admin"),
     ("GET", r"^/api/admin/users$", api_list_users, "admin"),
@@ -876,7 +901,7 @@ class QuizHandler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             return
         except Exception as exc:  # noqa: BLE001
-            sys.stderr.write("error handling %s %s: %r\n" % (method, self.path, exc))
+            sys.stderr.write(f"error handling {method} {self.path}: {exc!r}\n")
             return self.send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal server error"}
             )
@@ -895,7 +920,7 @@ class QuizHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         if LOG_REQUESTS:
-            sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
+            sys.stderr.write(f"{self.address_string()} {fmt % args}\n")
 
     def log_error(self, fmt, *args):
         sys.stderr.write("error: " + (fmt % args) + "\n")
@@ -945,7 +970,7 @@ def main():
     db.init()
     bootstrap_admin()
     server = ThreadingHTTPServer((HOST, PORT), QuizHandler)
-    sys.stderr.write("Air Cadets quiz running on http://%s:%d\n" % (HOST, PORT))
+    sys.stderr.write(f"Air Cadets quiz running on http://{HOST}:{PORT}\n")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

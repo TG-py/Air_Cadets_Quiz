@@ -40,12 +40,13 @@ def build_pool(conn, topic=None):
     if topic:
         rows = conn.execute(
             "SELECT id, question_text, answer_text, topic FROM questions "
-            "WHERE status = ? AND topic = ? COLLATE NOCASE",
+            "WHERE status = ? AND archived_at IS NULL AND topic = ? COLLATE NOCASE",
             (db.Q_APPROVED, topic),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, question_text, answer_text, topic FROM questions WHERE status = ?",
+            "SELECT id, question_text, answer_text, topic FROM questions "
+            "WHERE status = ? AND archived_at IS NULL",
             (db.Q_APPROVED,),
         ).fetchall()
 

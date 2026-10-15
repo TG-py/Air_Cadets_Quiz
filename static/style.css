@@ -683,6 +683,11 @@ button {
     border-color: var(--danger);
 }
 
+.chip-archived {
+    color: var(--muted);
+    border-color: var(--muted);
+}
+
 .bank-filters {
     display: flex;
     flex-wrap: wrap;
@@ -795,6 +800,10 @@ button {
 
 .bank-group[data-status="rejected"] .section-label {
     border-bottom-color: var(--danger);
+}
+
+.bank-group[data-status="archived"] .section-label {
+    border-bottom-color: var(--muted);
 }
 
 .bank-group .topic-box {

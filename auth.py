@@ -64,7 +64,7 @@ def validate_username(username):
 def validate_password(password):
     if len(password or "") < MIN_PASSWORD_LENGTH:
         raise ValueError(
-            "password must be at least %d characters" % MIN_PASSWORD_LENGTH
+            f"password must be at least {MIN_PASSWORD_LENGTH} characters"
         )
     return password
 
@@ -87,7 +87,7 @@ def start_session(conn, user_id):
 
 
 def login_rate_key(ip, username):
-    return "%s|%s" % (ip, (username or "").lower())
+    return f"{ip}|{(username or '').lower()}"
 
 
 def register_failure(key):
