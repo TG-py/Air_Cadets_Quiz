@@ -114,6 +114,8 @@ def api_login(ctx):
 
 
 def api_logout(ctx):
+    if ctx.user:
+        db.finish_active_quiz_session(ctx.conn, ctx.user["id"])
     if ctx.session:
         db.delete_session(ctx.conn, ctx.session["token"])
     ctx.handler.clear_cookie()
@@ -177,12 +179,62 @@ def api_record_attempt(ctx):
 
     skipped = 1 if ctx.body.get("skipped") else 0
     correct = 1 if ctx.body.get("correct") else 0
-    db.record_attempt(ctx.conn, question_id, correct, skipped, ctx.user["id"])
+    topic_filter = (ctx.body.get("topic_filter") or ctx.body.get("topic") or "")
+    topic_filter = topic_filter.strip() if isinstance(topic_filter, str) else ""
+
+    # every answer belongs to one stored quiz run, so the admin can later open
+    # each session on its own. The run is created lazily so older clients that
+    # just post answers still get grouped without calling anything else first.
+    run = db.get_active_quiz_session(ctx.conn, ctx.user["id"])
+    if not run:
+        run_id = db.create_quiz_session(
+            ctx.conn,
+            ctx.user["id"],
+            ctx.user["username"],
+            ctx.user["display_name"] or ctx.user["username"],
+            topic_filter,
+        )
+        run = db.get_quiz_session(ctx.conn, run_id)
+    elif topic_filter:
+        db.note_quiz_session_topic(ctx.conn, run["id"], topic_filter)
+
+    db.record_attempt(
+        ctx.conn,
+        question_id,
+        correct,
+        skipped,
+        ctx.user["id"],
+        quiz_session_id=run["id"],
+        question_text=question["question_text"],
+        answer_text=question["answer_text"],
+        topic=question["topic"],
+    )
     # a question counts as asked once it has been put to the squadron, so
     # switching topic without answering leaves it available to come back to
     if ctx.session:
         db.push_recent(ctx.conn, ctx.session["token"], question_id)
-    return {"ok": True, "overall": db.overall_stats(ctx.conn)}
+    return {"ok": True, "overall": db.overall_stats(ctx.conn), "quiz_session_id": run["id"]}
+
+
+def api_finish_quiz_session(ctx):
+    """Close the current quiz run and let the next question start a fresh one.
+
+    Finishing clears the "already asked" list for this login, so asking again
+    after the summary offers every question once more.
+    """
+    finished = db.finish_active_quiz_session(ctx.conn, ctx.user["id"])
+    if ctx.session:
+        ctx.conn.execute("UPDATE sessions SET recent = '' WHERE token = ?", (ctx.session["token"],))
+    if not finished:
+        return {"ok": True, "finished": False, "overall": db.overall_stats(ctx.conn)}
+    counts = db.quiz_session_counts(ctx.conn, finished["id"]) if finished["outcome"] == "finished" else None
+    return {
+        "ok": True,
+        "finished": finished["outcome"] == "finished",
+        "quiz_session_id": finished["id"],
+        "session": counts,
+        "overall": db.overall_stats(ctx.conn),
+    }
 
 
 def api_topics(ctx):
@@ -598,6 +650,35 @@ def api_reset_progress(ctx):
             "overall": db.overall_stats(ctx.conn)}
 
 
+def api_list_quiz_sessions(ctx):
+    return {"sessions": db.list_quiz_sessions(ctx.conn, completed_only=True)}
+
+
+def api_get_quiz_session(ctx):
+    session_id = int(ctx.match.group("id"))
+    row = db.get_quiz_session(ctx.conn, session_id)
+    if not row or not row["ended_at"]:
+        raise ApiError(HTTPStatus.NOT_FOUND, "session not found")
+    return {
+        "session": db.quiz_session_json(ctx.conn, row),
+        "attempts": db.list_quiz_session_attempts(ctx.conn, session_id),
+    }
+
+
+def api_delete_quiz_session(ctx):
+    # deleting one session is destructive and irreversible, like the
+    # delete-all-progress control, so insist the client confirmed it
+    if not ctx.body.get("confirm"):
+        raise bad_request("confirmation required before deleting this session")
+    session_id = int(ctx.match.group("id"))
+    row = db.get_quiz_session(ctx.conn, session_id)
+    if not row:
+        raise ApiError(HTTPStatus.NOT_FOUND, "session not found")
+    db.delete_quiz_session(ctx.conn, session_id)
+    return {"ok": True, "message": "that quiz session has been deleted",
+            "overall": db.overall_stats(ctx.conn)}
+
+
 ROUTES = [
     ("GET", r"^/api/auth/me$", api_me, "open"),
     ("POST", r"^/api/auth/login$", api_login, "csrf"),
@@ -605,6 +686,7 @@ ROUTES = [
     ("POST", r"^/api/auth/change-password$", api_change_password, "staff"),
     ("GET", r"^/api/quiz/next$", api_next_question, "staff"),
     ("POST", r"^/api/attempts$", api_record_attempt, "staff"),
+    ("POST", r"^/api/quiz/finish$", api_finish_quiz_session, "staff"),
     ("GET", r"^/api/questions$", api_list_questions, "staff"),
     ("GET", r"^/api/questions/counts$", api_question_counts, "open"),
     ("GET", r"^/api/topics$", api_topics, "open"),
@@ -621,6 +703,9 @@ ROUTES = [
     ("POST", r"^/api/admin/users/(?P<id>\d+)/password$", api_set_user_password, "admin"),
     ("POST", r"^/api/admin/topics/rename$", api_rename_topic, "admin"),
     ("POST", r"^/api/admin/reset-progress$", api_reset_progress, "admin"),
+    ("GET", r"^/api/admin/quiz-sessions$", api_list_quiz_sessions, "admin"),
+    ("GET", r"^/api/admin/quiz-sessions/(?P<id>\d+)$", api_get_quiz_session, "admin"),
+    ("POST", r"^/api/admin/quiz-sessions/(?P<id>\d+)/delete$", api_delete_quiz_session, "admin"),
     ("GET", r"^/api/stats$", api_stats, "staff"),
 ]
 

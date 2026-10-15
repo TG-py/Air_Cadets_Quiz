@@ -28,7 +28,7 @@
     </header>
 
     <button type="button" class="menu-toggle" id="menu-toggle"
-            aria-controls="side-menu" aria-expanded="false">Menu</button>
+            aria-controls="side-menu" aria-expanded="false" aria-label="Open menu">&#9776;</button>
     <div class="menu-overlay" id="menu-overlay" hidden></div>
     <aside class="side-menu" id="side-menu" aria-label="Main menu">
         <div class="side-menu-head">
@@ -40,6 +40,7 @@
             <button type="button" class="nav-btn staff-only" data-view="quiz">Ask questions</button>
             <button type="button" class="nav-btn hide-for-admin" data-view="submit">Submit a question</button>
             <button type="button" class="nav-btn staff-only" data-view="stats">Progress</button>
+            <button type="button" class="nav-btn admin-only" data-view="sessions" hidden>Quiz sessions</button>
             <button type="button" class="nav-btn admin-only" data-view="review" hidden>Review <span id="review-badge" class="badge" hidden>0</span></button>
             <button type="button" class="nav-btn admin-only" data-view="bank" hidden>Question bank</button>
             <button type="button" class="nav-btn admin-only" data-view="users" hidden>Staff/NCO accounts</button>
@@ -88,17 +89,20 @@
                     </div>
                 </div>
                 <div class="controls">
-                    <button type="button" class="primary" id="correct-btn">Correct</button>
+                    <button type="button" class="success" id="correct-btn">Correct</button>
                     <button type="button" class="danger" id="incorrect-btn">Incorrect</button>
-                    <button type="button" class="ghost ghost-warn" id="skip-btn">Skip</button>
-                    <button type="button" class="ghost" id="reveal-btn">Show answer</button>
-                    <button type="button" class="ghost ghost-accent" id="finish-btn">Finish</button>
+                    <button type="button" class="warn" id="skip-btn">Skip</button>
+                    <button type="button" class="secondary" id="reveal-btn">Show answer</button>
+                    <button type="button" class="primary" id="finish-btn">Finish</button>
                 </div>
             </div>
 
             <div class="card" id="quiz-empty" hidden>
                 <h2 id="quiz-empty-title">No questions to ask yet</h2>
                 <p class="muted" id="quiz-empty-text"></p>
+                <div class="controls">
+                    <button type="button" class="primary" id="quiz-empty-finish" hidden>Finish</button>
+                </div>
             </div>
 
             <div class="card" id="quiz-summary" hidden>
@@ -150,6 +154,13 @@
             <p class="hint text-box" id="review-summary"></p>
             <ul class="question-list" id="review-list"></ul>
             <p class="muted text-box" id="review-empty" hidden>Nothing waiting for review.</p>
+        </section>
+
+        <section class="view" id="view-sessions" hidden>
+            <h2>Quiz sessions</h2>
+            <p class="hint text-box">Every finished quiz is stored on its own. Open a session to see each question that was asked, whether it was correct, incorrect or skipped.</p>
+            <div class="accordion" id="sessions-list"></div>
+            <p class="muted text-box" id="sessions-empty" hidden>No quiz sessions have been finished yet.</p>
         </section>
 
         <section class="view" id="view-bank" hidden>

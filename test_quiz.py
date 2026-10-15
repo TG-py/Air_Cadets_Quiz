@@ -759,18 +759,30 @@ def run_tests():
         check("title left unboxed: %s" % heading, heading in index_html)
     check("only one .stat rule remains", css.count(".stat {") == 1, str(css.count(".stat {")))
 
-    print("\n[27] quiz buttons are never transparent")
+    print("\n[27] quiz buttons all share one solid style")
     ghost_block = css.split(".ghost {")[1].split("}")[0]
     check("ghost buttons are filled", "background: var(--card-hover)" in ghost_block, ghost_block)
     check("ghost buttons are no longer transparent", "background: transparent" not in ghost_block)
-    for btn in ("skip-btn", "reveal-btn", "finish-btn"):
-        check("%s uses a ghost button" % btn, 'class="ghost' in index_html.split('id="%s"' % btn)[0].rsplit("<button", 1)[1])
-    check("skip button is tinted amber", 'class="ghost ghost-warn" id="skip-btn"' in index_html)
-    check("finish button is tinted blue", 'class="ghost ghost-accent" id="finish-btn"' in index_html)
-    check("show answer button keeps the neutral fill", 'class="ghost" id="reveal-btn"' in index_html)
-    check("amber tint defined", ".ghost-warn {" in css)
-    check("blue tint defined", ".ghost-accent {" in css)
-    check("hover states defined for tints", ".ghost-warn:hover" in css and ".ghost-accent:hover" in css)
+    check("skip button is solid amber", 'class="warn" id="skip-btn"' in index_html)
+    check("correct button is solid green", 'class="success" id="correct-btn"' in index_html)
+    check("finish button is solid blue", 'class="primary" id="finish-btn"' in index_html)
+    check("show answer button is solid white", 'class="secondary" id="reveal-btn"' in index_html
+          and "background: #ffffff" in css.split(".secondary {")[1].split("}")[0])
+    check("the empty-state finish matches too", 'class="primary" id="quiz-empty-finish"' in index_html)
+    check("solid amber defined", ".warn {" in css)
+    check("solid neutral defined", ".secondary {" in css)
+    check("solid green defined", ".success {" in css)
+    check("no boxed wrapper around the buttons", "quiz-actions" not in index_html and "quiz-actions" not in css)
+    check("the whole set shares Show answer's edge",
+          "border: 1px solid var(--muted)" in css.split(".controls .primary,")[1].split("}")[0])
+    check("the whole set uses black text",
+          "color: #0b1016" in css.split(".controls .primary,")[1].split("}")[0])
+    check("no washed-out tints remain", ".ghost-warn" not in css and ".ghost-accent" not in css)
+    check("menu toggle is a symbol, not words",
+          'id="menu-toggle"' in index_html
+          and ">Menu</button>" not in index_html
+          and "&#9776;" in index_html.split('id="side-menu"')[0])
+    check("menu toggle keeps an accessible name", 'aria-label="Open menu"' in index_html)
 
     print("\n[23] review buttons actually reach the page")
     # the buttons were once built into a detached div and never inserted, so exercise

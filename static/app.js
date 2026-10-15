@@ -73,11 +73,10 @@ function setMenuOpen(open) {
     el("side-menu").classList.toggle("open", open);
     el("menu-overlay").hidden = !open;
     el("menu-toggle").setAttribute("aria-expanded", open ? "true" : "false");
+    // the toggle shows only a symbol, so the accessible name must say it
+    el("menu-toggle").setAttribute("aria-label", open ? "Close menu" : "Open menu");
     if (open) {
-        el("menu-toggle").setAttribute("aria-label", "Close menu");
         el("menu-close").focus();
-    } else {
-        el("menu-toggle").removeAttribute("aria-label");
     }
 }
 
@@ -97,6 +96,7 @@ function setView(name) {
     window.scrollTo({ top: 0, behavior: "smooth" });
     if (name === "quiz") ensureQuestion();
     if (name === "stats") loadStats();
+    if (name === "sessions") loadSessions();
     if (name === "submit") loadSubmitTopics();
     if (name === "review") loadPending();
     if (name === "bank") loadBank();
@@ -260,13 +260,61 @@ async function loadNextQuestion() {
     } catch (err) {
         if (err.status === 409) {
             el("quiz-panel").hidden = true;
+            const exhausted = err.reason === "exhausted";
             el("quiz-empty-title").textContent =
-                err.reason === "exhausted" ? "No more questions left to ask" : "No questions to ask yet";
+                exhausted ? "No more questions left to ask" : "No questions to ask yet";
             el("quiz-empty-text").textContent = err.message;
             el("quiz-empty").hidden = false;
+            // keep a way out when the bank runs dry: finishing from here
+            // closes the run so it lands straight on the sessions board,
+            // and clears the asked list so asking again starts a fresh run.
+            // (also shown after a dead-end topic switch mid-session.)
+            el("quiz-empty-finish").hidden = !(
+                exhausted || state.asked > 0 || state.skipped > 0
+            );
             return;
         }
         showError(err.message);
+    }
+}
+
+async function finishQuizSession() {
+    clearBanners();
+    try {
+        await api("/api/quiz/finish", { method: "POST", body: {} });
+    } catch (err) {
+        showError(err.message);
+        return;
+    }
+    // admins own the sessions board, so a finished run goes straight on it;
+    // everyone else gets the usual summary with a way to start another run.
+    if (state.user && state.user.role === "admin") {
+        resetSessionCounters();
+        state.question = null;
+        setView("sessions");
+        showOk("Session finished.");
+        return;
+    }
+    showSummary();
+}
+
+// closing or reloading the tab exits the run too, so an abandoned session
+// still lands on the sessions board instead of staying open forever.
+function finishOnPageHide() {
+    if (!state.user || !state.csrf) return;
+    try {
+        fetch("/api/quiz/finish", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": state.csrf,
+            },
+            body: "{}",
+            credentials: "same-origin",
+            keepalive: true,
+        });
+    } catch (err) {
+        // nothing useful to show during unload
     }
 }
 
@@ -319,6 +367,7 @@ async function recordAnswer(correct, skipped) {
                 question_id: questionId,
                 correct: correct,
                 skipped: skipped,
+                topic_filter: state.topic || "",
             },
         });
     } catch (err) {
@@ -976,6 +1025,161 @@ async function loadStats() {
     }
 }
 
+function sessionSummaryText(session) {
+    const scored = session.correct + session.incorrect;
+    const accuracy = scored ? Math.round((session.correct / scored) * 100) : 0;
+    return (
+        session.asked +
+        " asked · " +
+        session.correct +
+        " correct · " +
+        session.incorrect +
+        " incorrect · " +
+        session.skipped +
+        " skipped · " +
+        accuracy +
+        "% accuracy"
+    );
+}
+
+function formatSessionTime(value) {
+    // the server stores UTC ("...+00:00"); render it in the browser's local
+    // time so it matches the clock on the wall instead of showing UTC.
+    if (!value) return "";
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return value.slice(0, 16).replace("T", " ");
+    const pad = (n) => String(n).padStart(2, "0");
+    return (
+        date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) +
+        " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+    );
+}
+
+function sessionTitle(session) {
+    const who = session.display_name || session.username || "Staff/NCO";
+    const when = formatSessionTime(session.ended_at || session.started_at || "");
+    const topic = session.topic ? " · " + session.topic : "";
+    return who + " · " + when + topic;
+}
+
+function sessionAttemptItem(attempt) {
+    const item = document.createElement("li");
+
+    const text = document.createElement("p");
+    text.className = "q-text";
+    text.textContent = attempt.question_text || "(question removed)";
+    item.appendChild(text);
+
+    if (attempt.answer_text) {
+        const answer = document.createElement("p");
+        answer.className = "q-text muted";
+        answer.textContent = "Answer: " + attempt.answer_text;
+        item.appendChild(answer);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "q-meta";
+    if (attempt.topic) meta.appendChild(chip(attempt.topic, ""));
+    const resultClass =
+        attempt.result === "correct"
+            ? "chip-approved"
+            : attempt.result === "incorrect"
+              ? "chip-rejected"
+              : "chip-pending";
+    meta.appendChild(chip(attempt.result, resultClass));
+    item.appendChild(meta);
+    return item;
+}
+
+async function loadSessions() {
+    const box = el("sessions-list");
+    try {
+        const payload = await api("/api/admin/quiz-sessions");
+        box.replaceChildren();
+        const sessions = payload.sessions || [];
+        el("sessions-empty").hidden = sessions.length > 0;
+        sessions.forEach((session) => {
+            const details = document.createElement("details");
+            details.className = "topic-box";
+
+            const summary = document.createElement("summary");
+            const name = document.createElement("span");
+            name.className = "topic-name";
+            name.textContent = sessionTitle(session);
+            const meta = document.createElement("span");
+            meta.className = "topic-meta";
+            meta.textContent = sessionSummaryText(session);
+            summary.appendChild(name);
+            summary.appendChild(meta);
+            details.appendChild(summary);
+
+            const body = document.createElement("div");
+            body.className = "topic-body";
+            const hint = document.createElement("p");
+            hint.className = "muted";
+            hint.textContent = "Loading...";
+            body.appendChild(hint);
+            details.appendChild(body);
+
+            let loaded = false;
+            details.addEventListener("toggle", async () => {
+                if (!details.open || loaded) return;
+                loaded = true;
+                try {
+                    const detail = await api("/api/admin/quiz-sessions/" + session.id);
+                    body.replaceChildren();
+                    const list = document.createElement("ul");
+                    list.className = "question-list";
+                    (detail.attempts || []).forEach((attempt) => {
+                        list.appendChild(sessionAttemptItem(attempt));
+                    });
+                    if (!detail.attempts || !detail.attempts.length) {
+                        const empty = document.createElement("p");
+                        empty.className = "muted";
+                        empty.textContent = "No answers recorded in this session.";
+                        body.appendChild(empty);
+                    } else {
+                        body.appendChild(list);
+                    }
+                    body.appendChild(
+                        makeButton("Delete this session", "no", () => deleteQuizSession(session.id))
+                    );
+                } catch (err) {
+                    hint.textContent = err.message;
+                    loaded = false;
+                }
+            });
+
+            box.appendChild(details);
+        });
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function deleteQuizSession(sessionId) {
+    const first = window.confirm(
+        "Delete this quiz session?\n\n" +
+            "Every recorded correct, incorrect and skipped answer in this session will be removed. " +
+            "Questions, staff/NCO accounts and the question bank are kept."
+    );
+    if (!first) return;
+    const second = window.confirm(
+        "This cannot be undone.\n\nClick OK to permanently delete this quiz session."
+    );
+    if (!second) return;
+    try {
+        const payload = await api("/api/admin/quiz-sessions/" + sessionId + "/delete", {
+            method: "POST",
+            body: { confirm: true },
+        });
+        showOk(payload.message || "That quiz session has been deleted.");
+        loadSessions();
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
 async function setUserUsername(user) {
     const values = await askForValues({
         title: "Change username",
@@ -1230,7 +1434,9 @@ function bindEvents() {
     el("correct-btn").addEventListener("click", () => recordAnswer(true, false));
     el("incorrect-btn").addEventListener("click", () => recordAnswer(false, false));
     el("skip-btn").addEventListener("click", () => recordAnswer(false, true));
-    el("finish-btn").addEventListener("click", showSummary);
+    el("finish-btn").addEventListener("click", finishQuizSession);
+    el("quiz-empty-finish").addEventListener("click", finishQuizSession);
+    window.addEventListener("pagehide", finishOnPageHide);
 
     el("reveal-btn").addEventListener("click", () => {
         state.showAnswer = !state.showAnswer;

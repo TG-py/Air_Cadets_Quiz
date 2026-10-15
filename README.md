@@ -21,7 +21,7 @@ No external dependencies. Python 3.9+ standard library and SQLite only.
 | --- | --- |
 | Cadet (no login) | Submit new questions on the Submit page, pick an existing topic or add a new one |
 | NCO / staff | Log in, ask questions, record correct/incorrect or skip, add questions directly, see progress |
-| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, import a question list, create, edit and disable staff/NCO accounts, delete all progress |
+| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, delete all progress |
 
 Only staff/NCO and admins can see questions or record answers - cadets get a 401 on
 those endpoints. Cadets see the Submit page and nothing else.
@@ -120,8 +120,37 @@ The *Progress* page is built in three layers:
 
 That is the page to look at when deciding what to drill next week.
 
+## Quiz sessions
+
+Every quiz is stored as its own session. Answering questions groups them
+into the current session, and pressing **Finish** closes it so the next
+question starts a fresh one. Logging out finishes any open session too.
+
+Admins get a *Quiz sessions* page listing every finished session, newest
+first, with who ran it, when, which topic filter was used, and how many
+were correct, incorrect or skipped. Opening a session expands it to show
+each question asked, its answer, and whether it was correct, incorrect or
+skipped. When the bank runs dry the ask view keeps a **Finish** button, so
+an exhausted run can still be closed (which also clears the asked list so
+asking again starts fresh). Finishing as an admin jumps straight to the
+sessions board, and closing or reloading the tab finishes any open run so
+it lands on the board instead of staying open. A session can be deleted on its own after the same double
+confirmation used for deleting all progress - only that session's answers
+are removed, and the question bank and accounts are kept.
+
 ## Docker
 
+### Docker Desktop, no terminal
+
+Open this project folder in Docker Desktop (use the folder/project view, not
+just the built image). Docker Desktop should detect `docker-compose.yml` and
+show a Compose project. Click **Run** / **Start** on that project rather than
+running the individual image.
+
+You do not need to create a `.env` file: if `ADMIN_PASSWORD` is unset the
+app generates a random password on first run and prints it to the container
+logs (view them in Docker Desktop). The container listens on port 8001 and
+stores data in the `quiz-data` volume automatically.
 Requires Docker with the `compose` plugin (Docker Desktop, or `docker-compose` v2).
 
 ```bash

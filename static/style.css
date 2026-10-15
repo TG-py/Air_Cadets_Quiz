@@ -79,13 +79,14 @@ body::before {
     top: 0.9rem;
     right: 0.9rem;
     z-index: 70;
-    padding: 0.55rem 1.1rem;
-    font-size: 0.9rem;
+    padding: 0.35rem 0.7rem;
+    font-size: 1.25rem;
+    line-height: 1;
     font-weight: 600;
     color: var(--text);
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 10px;
 }
 
 .menu-toggle:hover {
@@ -331,6 +332,52 @@ button {
     border: 1px solid var(--danger);
 }
 
+.danger:hover {
+    filter: brightness(1.1);
+}
+
+/* solid green, so Finish reads as the way forward */
+.success {
+    margin-top: 0;
+    padding: 0.7rem 1rem;
+    font-weight: 600;
+    color: #0b1016;
+    background: var(--ok);
+    border: 1px solid var(--ok);
+}
+
+.success:hover {
+    filter: brightness(1.1);
+}
+
+/* solid amber, so Skip carries the same weight as Correct and Incorrect */
+.warn {
+    margin-top: 0;
+    padding: 0.7rem 1rem;
+    font-weight: 600;
+    color: #0b1016;
+    background: var(--warn);
+    border: 1px solid var(--warn);
+}
+
+.warn:hover {
+    filter: brightness(1.1);
+}
+
+/* solid white, so Show answer matches the rest of the quiz row */
+.secondary {
+    margin-top: 0;
+    padding: 0.7rem 1rem;
+    font-weight: 600;
+    color: #0b1016;
+    background: #ffffff;
+    border: 1px solid var(--muted);
+}
+
+.secondary:hover {
+    border-color: #0b1016;
+}
+
 .ghost {
     margin-top: 0;
     padding: 0.7rem 1rem;
@@ -343,32 +390,6 @@ button {
 .ghost:hover {
     background: var(--card-active);
     border-color: var(--muted);
-}
-
-/* skip and finish carry a tint so they read as real buttons without
-   competing with the solid Correct and Incorrect buttons */
-.ghost-warn {
-    color: #e8c07d;
-    background: rgba(210, 153, 34, 0.16);
-    border-color: var(--warn);
-}
-
-.ghost-warn:hover {
-    color: #f0d09a;
-    background: rgba(210, 153, 34, 0.3);
-    border-color: var(--warn);
-}
-
-.ghost-accent {
-    color: var(--accent-strong);
-    background: rgba(74, 159, 216, 0.16);
-    border-color: var(--accent);
-}
-
-.ghost-accent:hover {
-    color: #9bd4f8;
-    background: rgba(74, 159, 216, 0.3);
-    border-color: var(--accent);
 }
 
 .link-btn {
@@ -388,11 +409,17 @@ button {
     margin-bottom: 1rem;
 }
 
-/* keep the quiz buttons the same height as each other, whatever their base class */
+/* keep the quiz buttons the same height with one shared edge and black
+   text, taken from Show answer, whatever their base colour */
 .controls .primary,
 .controls .danger,
+.controls .warn,
+.controls .secondary,
+.controls .success,
 .controls .ghost {
     margin-top: 0;
+    border: 1px solid var(--muted);
+    color: #0b1016;
 }
 
 .banner {

@@ -54,13 +54,30 @@ CREATE TABLE IF NOT EXISTS questions (
 CREATE INDEX IF NOT EXISTS questions_status ON questions(status);
 CREATE INDEX IF NOT EXISTS questions_topic ON questions(topic);
 
+CREATE TABLE IF NOT EXISTS quiz_sessions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username     TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL DEFAULT '',
+    topic        TEXT NOT NULL DEFAULT '',
+    started_at   TEXT NOT NULL,
+    ended_at     TEXT,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS quiz_sessions_user ON quiz_sessions(user_id);
+CREATE INDEX IF NOT EXISTS quiz_sessions_ended ON quiz_sessions(ended_at);
+
 CREATE TABLE IF NOT EXISTS attempts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
     correct     INTEGER NOT NULL DEFAULT 0 CHECK (correct IN (0, 1)),
     skipped     INTEGER NOT NULL DEFAULT 0 CHECK (skipped IN (0, 1)),
     answered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    quiz_session_id INTEGER REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+    question_text TEXT NOT NULL DEFAULT '',
+    answer_text   TEXT NOT NULL DEFAULT '',
+    topic         TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS attempts_question ON attempts(question_id);
 """
@@ -143,6 +160,57 @@ def drop_readable_passwords(conn):
         pass
 
 
+def ensure_quiz_session_schema(conn):
+    """Bring older databases up to date with per-session quiz history.
+
+    Fresh databases get the tables from SCHEMA. Databases created before
+    quiz sessions existed only have the old attempts table, so add the
+    missing table and columns here rather than losing any history.
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS quiz_sessions ("
+        "    id           INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "    user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,"
+        "    username     TEXT NOT NULL DEFAULT '',"
+        "    display_name TEXT NOT NULL DEFAULT '',"
+        "    topic        TEXT NOT NULL DEFAULT '',"
+        "    started_at   TEXT NOT NULL,"
+        "    ended_at     TEXT,"
+        "    created_at   TEXT NOT NULL"
+        ")"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS quiz_sessions_user ON quiz_sessions(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS quiz_sessions_ended ON quiz_sessions(ended_at)")
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(attempts)")}
+    for column, ddl in (
+        ("quiz_session_id", "INTEGER REFERENCES quiz_sessions(id) ON DELETE CASCADE"),
+        ("question_text", "TEXT NOT NULL DEFAULT ''"),
+        ("answer_text", "TEXT NOT NULL DEFAULT ''"),
+        ("topic", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in existing:
+            try:
+                conn.execute("ALTER TABLE attempts ADD COLUMN %s %s" % (column, ddl))
+            except sqlite3.Error:
+                pass
+    conn.execute("CREATE INDEX IF NOT EXISTS attempts_quiz_session ON attempts(quiz_session_id)")
+    # attempts recorded before snapshots existed keep only the question id, so
+    # copy the current bank text across where the question still exists
+    try:
+        conn.execute(
+            "UPDATE attempts SET question_text = "
+            "(SELECT question_text FROM questions WHERE questions.id = attempts.question_id), "
+            "answer_text = "
+            "(SELECT answer_text FROM questions WHERE questions.id = attempts.question_id), "
+            "topic = "
+            "(SELECT topic FROM questions WHERE questions.id = attempts.question_id) "
+            "WHERE (question_text IS NULL OR question_text = '') "
+            "AND EXISTS (SELECT 1 FROM questions WHERE questions.id = attempts.question_id)"
+        )
+    except sqlite3.Error:
+        pass
+
+
 def init():
     conn = sqlite3.connect(DB_PATH, timeout=15, isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -151,6 +219,7 @@ def init():
         conn.execute("PRAGMA synchronous = NORMAL")
         conn.executescript(SCHEMA)
         drop_readable_passwords(conn)
+        ensure_quiz_session_schema(conn)
         conn.execute("PRAGMA wal_autocheckpoint = 512")
     finally:
         conn.close()
@@ -216,7 +285,9 @@ def admin_set_password(conn, user_id, password_hash, salt):
 
 def reset_progress(conn):
     """Wipe every recorded answer and let all sessions start the quiz afresh."""
+    ensure_quiz_session_schema(conn)
     conn.execute("DELETE FROM attempts")
+    conn.execute("DELETE FROM quiz_sessions")
     conn.execute("UPDATE sessions SET recent = ''")
     return conn.total_changes
 
@@ -354,12 +425,190 @@ def push_recent(conn, token, question_id, keep=2000):
     )
 
 
-def record_attempt(conn, question_id, correct, skipped, answered_by):
+def record_attempt(conn, question_id, correct, skipped, answered_by,
+                   quiz_session_id=None, question_text="", answer_text="", topic=""):
+    ensure_quiz_session_schema(conn)
     conn.execute(
-        "INSERT INTO attempts (question_id, correct, skipped, answered_by, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (question_id, 1 if correct else 0, 1 if skipped else 0, answered_by, now()),
+        "INSERT INTO attempts (question_id, correct, skipped, answered_by, created_at, "
+        "quiz_session_id, question_text, answer_text, topic) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (question_id, 1 if correct else 0, 1 if skipped else 0, answered_by, now(),
+         quiz_session_id, question_text or "", answer_text or "", topic or ""),
     )
+
+
+def get_active_quiz_session(conn, user_id):
+    """The quiz run this account is currently asking, if any."""
+    ensure_quiz_session_schema(conn)
+    if not user_id:
+        return None
+    return conn.execute(
+        "SELECT * FROM quiz_sessions WHERE user_id = ? AND ended_at IS NULL "
+        "ORDER BY id DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+
+
+def create_quiz_session(conn, user_id, username="", display_name="", topic=""):
+    ensure_quiz_session_schema(conn)
+    stamp = now()
+    cur = conn.execute(
+        "INSERT INTO quiz_sessions (user_id, username, display_name, topic, "
+        "started_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, username or "", display_name or "", topic or "", stamp, stamp),
+    )
+    return cur.lastrowid
+
+
+def get_quiz_session(conn, session_id):
+    ensure_quiz_session_schema(conn)
+    return conn.execute(
+        "SELECT * FROM quiz_sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+
+
+def note_quiz_session_topic(conn, session_id, topic_filter):
+    """Remember which topic filter a run is using, for the admin list.
+
+    A run that stays on one topic keeps its name. One that moves between
+    topics is labelled Mixed so the list does not pretend otherwise.
+    """
+    topic_filter = (topic_filter or "").strip()
+    if not topic_filter:
+        return
+    row = get_quiz_session(conn, session_id)
+    if not row:
+        return
+    current = row["topic"] or ""
+    if not current:
+        conn.execute("UPDATE quiz_sessions SET topic = ? WHERE id = ?", (topic_filter, session_id))
+    elif current != topic_filter and current != "Mixed":
+        conn.execute("UPDATE quiz_sessions SET topic = 'Mixed' WHERE id = ?", (session_id,))
+
+
+def quiz_session_counts(conn, session_id):
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "COALESCE(SUM(CASE WHEN skipped = 0 THEN 1 ELSE 0 END), 0) AS asked, "
+        "COALESCE(SUM(CASE WHEN skipped = 0 AND correct = 1 THEN 1 ELSE 0 END), 0) AS correct, "
+        "COALESCE(SUM(CASE WHEN skipped = 1 THEN 1 ELSE 0 END), 0) AS skipped "
+        "FROM attempts WHERE quiz_session_id = ?",
+        (session_id,),
+    ).fetchone()
+    asked = row["asked"] or 0
+    correct = row["correct"] or 0
+    return {
+        "asked": asked,
+        "correct": correct,
+        "incorrect": asked - correct,
+        "skipped": row["skipped"] or 0,
+        "total": row["total"] or 0,
+        "accuracy": round(correct / asked * 100, 1) if asked else 0.0,
+    }
+
+
+def quiz_session_json(conn, row):
+    counts = quiz_session_counts(conn, row["id"])
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "username": row["username"],
+        "display_name": row["display_name"] or row["username"],
+        "topic": row["topic"],
+        "started_at": row["started_at"],
+        "ended_at": row["ended_at"],
+        "asked": counts["asked"],
+        "correct": counts["correct"],
+        "incorrect": counts["incorrect"],
+        "skipped": counts["skipped"],
+        "total": counts["total"],
+        "accuracy": counts["accuracy"],
+    }
+
+
+def list_quiz_sessions(conn, completed_only=True):
+    """Every stored quiz run, newest first, each with its own totals."""
+    ensure_quiz_session_schema(conn)
+    sql = "SELECT * FROM quiz_sessions"
+    if completed_only:
+        sql += " WHERE ended_at IS NOT NULL"
+    sql += " ORDER BY COALESCE(ended_at, started_at) DESC, id DESC"
+    return [quiz_session_json(conn, row) for row in conn.execute(sql).fetchall()]
+
+
+def list_quiz_session_attempts(conn, session_id):
+    """Each answer inside one run, oldest first, with the question text kept.
+
+    The question text is snapshotted when the answer is recorded, so deleting
+    or editing the bank later does not rewrite what was actually asked.
+    """
+    ensure_quiz_session_schema(conn)
+    rows = conn.execute(
+        "SELECT a.id, a.question_id, a.correct, a.skipped, a.created_at, "
+        "a.answered_by, a.question_text AS snap_text, a.answer_text AS snap_answer, "
+        "a.topic AS snap_topic, "
+        "q.question_text AS live_text, q.answer_text AS live_answer, q.topic AS live_topic "
+        "FROM attempts a LEFT JOIN questions q ON q.id = a.question_id "
+        "WHERE a.quiz_session_id = ? ORDER BY a.id ASC",
+        (session_id,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        if row["skipped"]:
+            result = "skipped"
+        elif row["correct"]:
+            result = "correct"
+        else:
+            result = "incorrect"
+        out.append(
+            {
+                "id": row["id"],
+                "question_id": row["question_id"],
+                "question_text": row["snap_text"] or row["live_text"] or "",
+                "answer_text": row["snap_answer"] or row["live_answer"] or "",
+                "topic": row["snap_topic"] or row["live_topic"] or "",
+                "correct": bool(row["correct"]),
+                "skipped": bool(row["skipped"]),
+                "result": result,
+                "created_at": row["created_at"],
+            }
+        )
+    return out
+
+
+def finish_quiz_session(conn, session_id):
+    """Close a run. Empty runs are removed so the admin list stays meaningful."""
+    ensure_quiz_session_schema(conn)
+    count = conn.execute(
+        "SELECT COUNT(*) FROM attempts WHERE quiz_session_id = ?", (session_id,)
+    ).fetchone()[0]
+    if not count:
+        conn.execute("DELETE FROM quiz_sessions WHERE id = ?", (session_id,))
+        return "deleted"
+    conn.execute(
+        "UPDATE quiz_sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
+        (now(), session_id),
+    )
+    return "finished"
+
+
+def finish_active_quiz_session(conn, user_id):
+    row = get_active_quiz_session(conn, user_id)
+    if not row:
+        return None
+    outcome = finish_quiz_session(conn, row["id"])
+    return {"id": row["id"], "outcome": outcome}
+
+
+def delete_quiz_session(conn, session_id):
+    """Delete one stored run and every answer recorded inside it.
+
+    The question bank and the accounts are left untouched.
+    """
+    ensure_quiz_session_schema(conn)
+    conn.execute("DELETE FROM attempts WHERE quiz_session_id = ?", (session_id,))
+    cur = conn.execute("DELETE FROM quiz_sessions WHERE id = ?", (session_id,))
+    return cur.rowcount
 
 
 def overall_stats(conn):

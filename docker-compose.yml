@@ -6,8 +6,10 @@ services:
     ports:
       - "8001:8001"
     environment:
+      # Leave ADMIN_PASSWORD unset/empty to have the app generate a random
+      # password on first run and print it to the container logs.
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in a .env file next to this compose file}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       QUIZ_SECURE_COOKIES: ${QUIZ_SECURE_COOKIES:-0}
       QUIZ_LOG: ${QUIZ_LOG:-0}
     volumes:
