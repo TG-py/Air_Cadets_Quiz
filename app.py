@@ -444,7 +444,9 @@ def api_set_stale(ctx):
 
 
 def api_report_question(ctx):
-    # NCOs spot wrong questions while asking them; the report lands with the admin
+    # anyone on the quiz can flag a wrong question - signed-in staff under
+    # their account name, everyone else under the name they give. The report
+    # lands with the admin either way.
     question_id = int(ctx.match.group("id"))
     question = db.get_question(ctx.conn, question_id)
     if not question or question["status"] != db.Q_APPROVED or question["archived_at"]:
@@ -452,16 +454,146 @@ def api_report_question(ctx):
     reason = (ctx.body.get("reason") or "").strip() if isinstance(ctx.body.get("reason"), str) else ""
     if len(reason) > 1000:
         raise bad_request("report is too long (max 1000 characters)")
-    if db.has_pending_report(ctx.conn, question_id, ctx.user["id"]):
-        raise ApiError(HTTPStatus.CONFLICT, "you have already reported this question")
-    db.add_report(
-        ctx.conn,
-        question_id,
-        ctx.user["id"],
-        ctx.user["display_name"] or ctx.user["username"],
-        reason,
-    )
+    if ctx.user:
+        if db.has_pending_report(ctx.conn, question_id, ctx.user["id"]):
+            raise ApiError(HTTPStatus.CONFLICT, "you have already reported this question")
+        user_id = ctx.user["id"]
+        name = ctx.user["display_name"] or ctx.user["username"]
+    else:
+        raw = ctx.body.get("reporter_name")
+        name = raw.strip() if isinstance(raw, str) else ""
+        if len(name) < 2:
+            raise bad_request("please give your name so the admin knows who reported it")
+        if len(name) > 80:
+            raise bad_request("name is too long (max 80 characters)")
+        if db.has_pending_report_by_name(ctx.conn, question_id, name):
+            raise ApiError(HTTPStatus.CONFLICT, "you have already reported this question")
+        user_id = None
+    db.add_report(ctx.conn, question_id, user_id, name, reason)
     return {"ok": True, "message": "reported - an admin will check it"}
+
+
+def api_practice_start(ctx):
+    """Begin a solo practice run under a name. Open to everyone, including
+    guests - the run is recorded apart from the squadron results."""
+    raw = ctx.body.get("name")
+    name = raw.strip() if isinstance(raw, str) else ""
+    if len(name) < 2:
+        raise bad_request("please enter your name before practising")
+    if len(name) > 80:
+        raise bad_request("name is too long (max 80 characters)")
+    topic = ctx.body.get("topic")
+    topic = topic.strip() if isinstance(topic, str) else ""
+    if topic and topic not in db.list_topics(ctx.conn):
+        raise bad_request("unknown topic")
+    session_id = db.create_practice_session(ctx.conn, name, topic)
+    return {"ok": True, "practice_session_id": session_id, "name": name, "topic": topic}
+
+
+def api_practice_next(ctx):
+    """Next practice question: same active bank as the squadron quiz, minus
+    the ones already faced in this run. Open to everyone."""
+    try:
+        session_id = int((ctx.q("practice_session_id") or "").strip())
+    except (TypeError, ValueError):
+        raise bad_request("practice_session_id must be a number")
+    run = db.get_practice_session(ctx.conn, session_id)
+    if not run or run["ended_at"]:
+        raise bad_request("unknown practice session")
+    topic = run["topic"] or None
+    pool = quiz.build_pool(ctx.conn, topic)
+    answered = db.practice_answered_ids(ctx.conn, session_id)
+    question = quiz.pick(pool, answered)
+    if not question:
+        counts = db.question_counts(ctx.conn)
+        if counts["approved"] == 0:
+            raise ApiError(HTTPStatus.CONFLICT, "no approved questions yet", "empty")
+        if not pool:
+            raise ApiError(
+                HTTPStatus.CONFLICT, "no approved questions match that topic", "topic"
+            )
+        raise ApiError(
+            HTTPStatus.CONFLICT,
+            "you have practised every question - finish to see your score",
+            "exhausted",
+        )
+    return {"question": question}
+
+
+def api_practice_attempt(ctx):
+    """Record one practice answer. Squadron totals are never touched."""
+    try:
+        session_id = int(ctx.body.get("practice_session_id") or 0)
+    except (TypeError, ValueError):
+        raise bad_request("practice_session_id must be a number")
+    try:
+        question_id = int((ctx.body.get("question_id") or ""))
+    except (TypeError, ValueError):
+        raise bad_request("question_id must be a number")
+    run = db.get_practice_session(ctx.conn, session_id)
+    if not run or run["ended_at"]:
+        raise bad_request("unknown practice session")
+    question = db.get_question(ctx.conn, question_id)
+    if not question or question["status"] != db.Q_APPROVED or question["archived_at"]:
+        raise bad_request("unknown question")
+    skipped = 1 if ctx.body.get("skipped") else 0
+    correct = 1 if ctx.body.get("correct") else 0
+    db.record_practice_attempt(
+        ctx.conn,
+        session_id,
+        question_id,
+        correct,
+        skipped,
+        question_text=question["question_text"],
+        answer_text=question["answer_text"],
+        topic=question["topic"],
+    )
+    return {"ok": True, "session": db.practice_session_counts(ctx.conn, session_id)}
+
+
+def api_practice_finish(ctx):
+    """Close a practice run and return its score."""
+    try:
+        session_id = int(ctx.body.get("practice_session_id") or 0)
+    except (TypeError, ValueError):
+        raise bad_request("practice_session_id must be a number")
+    run = db.get_practice_session(ctx.conn, session_id)
+    if not run:
+        raise bad_request("unknown practice session")
+    outcome = db.finish_practice_session(ctx.conn, session_id)
+    counts = db.practice_session_counts(ctx.conn, session_id) if outcome == "finished" else None
+    return {
+        "ok": True,
+        "finished": outcome == "finished",
+        "practice_session_id": session_id,
+        "session": counts,
+    }
+
+
+def api_list_practice_sessions(ctx):
+    return {"sessions": db.list_practice_sessions(ctx.conn, completed_only=True)}
+
+
+def api_get_practice_session(ctx):
+    session_id = int(ctx.match.group("id"))
+    row = db.get_practice_session(ctx.conn, session_id)
+    if not row or not row["ended_at"]:
+        raise ApiError(HTTPStatus.NOT_FOUND, "session not found")
+    return {
+        "session": db.practice_session_json(ctx.conn, row),
+        "attempts": db.list_practice_attempts(ctx.conn, session_id),
+    }
+
+
+def api_delete_practice_session(ctx):
+    if not ctx.body.get("confirm"):
+        raise bad_request("confirmation required before deleting this session")
+    session_id = int(ctx.match.group("id"))
+    row = db.get_practice_session(ctx.conn, session_id)
+    if not row:
+        raise ApiError(HTTPStatus.NOT_FOUND, "session not found")
+    db.delete_practice_session(ctx.conn, session_id)
+    return {"ok": True, "message": "that practice session has been deleted"}
 
 
 def api_list_reports(ctx):
@@ -812,7 +944,11 @@ ROUTES = [
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/restore$", api_restore_question, "admin"),
     ("GET", r"^/api/admin/stale$", api_list_stale, "admin"),
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/stale$", api_set_stale, "admin"),
-    ("POST", r"^/api/questions/(?P<id>\d+)/report$", api_report_question, "staff"),
+    ("POST", r"^/api/questions/(?P<id>\d+)/report$", api_report_question, "csrf"),
+    ("POST", r"^/api/practice/start$", api_practice_start, "csrf"),
+    ("GET", r"^/api/practice/next$", api_practice_next, "open"),
+    ("POST", r"^/api/practice/attempts$", api_practice_attempt, "csrf"),
+    ("POST", r"^/api/practice/finish$", api_practice_finish, "csrf"),
     ("GET", r"^/api/admin/reports$", api_list_reports, "admin"),
     ("POST", r"^/api/admin/reports/(?P<id>\d+)/resolve$", api_resolve_report, "admin"),
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/edit$", api_edit_question, "admin"),
@@ -827,6 +963,9 @@ ROUTES = [
     ("GET", r"^/api/admin/quiz-sessions$", api_list_quiz_sessions, "admin"),
     ("GET", r"^/api/admin/quiz-sessions/(?P<id>\d+)$", api_get_quiz_session, "admin"),
     ("POST", r"^/api/admin/quiz-sessions/(?P<id>\d+)/delete$", api_delete_quiz_session, "admin"),
+    ("GET", r"^/api/admin/practice-sessions$", api_list_practice_sessions, "admin"),
+    ("GET", r"^/api/admin/practice-sessions/(?P<id>\d+)$", api_get_practice_session, "admin"),
+    ("POST", r"^/api/admin/practice-sessions/(?P<id>\d+)/delete$", api_delete_practice_session, "admin"),
     ("GET", r"^/api/stats$", api_stats, "staff"),
 ]
 

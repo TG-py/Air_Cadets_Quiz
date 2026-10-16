@@ -97,6 +97,30 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 CREATE INDEX IF NOT EXISTS reports_question ON reports(question_id);
 CREATE INDEX IF NOT EXISTS reports_status ON reports(status);
+
+CREATE TABLE IF NOT EXISTS practice_sessions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL DEFAULT '',
+    topic      TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    ended_at   TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS practice_sessions_ended ON practice_sessions(ended_at);
+
+CREATE TABLE IF NOT EXISTS practice_attempts (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    practice_session_id INTEGER NOT NULL REFERENCES practice_sessions(id) ON DELETE CASCADE,
+    question_id         INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    correct             INTEGER NOT NULL DEFAULT 0 CHECK (correct IN (0, 1)),
+    skipped             INTEGER NOT NULL DEFAULT 0 CHECK (skipped IN (0, 1)),
+    created_at          TEXT NOT NULL,
+    question_text       TEXT NOT NULL DEFAULT '',
+    answer_text         TEXT NOT NULL DEFAULT '',
+    topic               TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS practice_attempts_session ON practice_attempts(practice_session_id);
+CREATE INDEX IF NOT EXISTS practice_attempts_question ON practice_attempts(question_id);
 """
 
 
@@ -241,6 +265,7 @@ def init():
         if "archived_at" not in question_columns:
             conn.execute("ALTER TABLE questions ADD COLUMN archived_at TEXT")
         ensure_outdated_schema(conn)
+        ensure_practice_schema(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS questions_archived ON questions(archived_at)"
         )
@@ -828,6 +853,218 @@ def delete_quiz_session(conn, session_id):
     conn.execute("DELETE FROM attempts WHERE quiz_session_id = ?", (session_id,))
     cur = conn.execute("DELETE FROM quiz_sessions WHERE id = ?", (session_id,))
     return cur.rowcount
+
+
+def ensure_practice_schema(conn):
+    """Solo practice runs, recorded apart from the squadron scoreboard.
+
+    Fresh databases get the tables from SCHEMA. Older databases gain them
+    here so the bank and its history are left untouched.
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS practice_sessions ("
+        "    id         INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "    name       TEXT NOT NULL DEFAULT '',"
+        "    topic      TEXT NOT NULL DEFAULT '',"
+        "    started_at TEXT NOT NULL,"
+        "    ended_at   TEXT,"
+        "    created_at TEXT NOT NULL"
+        ")"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS practice_sessions_ended ON practice_sessions(ended_at)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS practice_attempts ("
+        "    id                  INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "    practice_session_id INTEGER NOT NULL REFERENCES practice_sessions(id) ON DELETE CASCADE,"
+        "    question_id         INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,"
+        "    correct             INTEGER NOT NULL DEFAULT 0 CHECK (correct IN (0, 1)),"
+        "    skipped             INTEGER NOT NULL DEFAULT 0 CHECK (skipped IN (0, 1)),"
+        "    created_at          TEXT NOT NULL,"
+        "    question_text       TEXT NOT NULL DEFAULT '',"
+        "    answer_text         TEXT NOT NULL DEFAULT '',"
+        "    topic               TEXT NOT NULL DEFAULT ''"
+        ")"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS practice_attempts_session ON practice_attempts(practice_session_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS practice_attempts_question ON practice_attempts(question_id)"
+    )
+
+
+def create_practice_session(conn, name, topic=""):
+    """Start a solo practice run. Any earlier open run under the same name is
+    closed first, so abandoned runs do not pile up in the admin list."""
+    ensure_practice_schema(conn)
+    stamp = now()
+    conn.execute(
+        "UPDATE practice_sessions SET ended_at = ? "
+        "WHERE ended_at IS NULL AND name = ? COLLATE NOCASE",
+        (stamp, name),
+    )
+    cur = conn.execute(
+        "INSERT INTO practice_sessions (name, topic, started_at, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (name, topic or "", stamp, stamp),
+    )
+    return cur.lastrowid
+
+
+def get_practice_session(conn, session_id):
+    ensure_practice_schema(conn)
+    return conn.execute(
+        "SELECT * FROM practice_sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+
+
+def practice_answered_ids(conn, session_id):
+    """Questions already faced in this practice run, so none repeat."""
+    ensure_practice_schema(conn)
+    return [
+        row["question_id"]
+        for row in conn.execute(
+            "SELECT question_id FROM practice_attempts WHERE practice_session_id = ?",
+            (session_id,),
+        )
+    ]
+
+
+def record_practice_attempt(conn, session_id, question_id, correct, skipped,
+                            question_text="", answer_text="", topic=""):
+    ensure_practice_schema(conn)
+    conn.execute(
+        "INSERT INTO practice_attempts (practice_session_id, question_id, correct, "
+        "skipped, created_at, question_text, answer_text, topic) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (session_id, question_id, 1 if correct else 0, 1 if skipped else 0, now(),
+         question_text or "", answer_text or "", topic or ""),
+    )
+
+
+def practice_session_counts(conn, session_id):
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "COALESCE(SUM(CASE WHEN skipped = 0 THEN 1 ELSE 0 END), 0) AS asked, "
+        "COALESCE(SUM(CASE WHEN skipped = 0 AND correct = 1 THEN 1 ELSE 0 END), 0) AS correct, "
+        "COALESCE(SUM(CASE WHEN skipped = 1 THEN 1 ELSE 0 END), 0) AS skipped "
+        "FROM practice_attempts WHERE practice_session_id = ?",
+        (session_id,),
+    ).fetchone()
+    asked = row["asked"] or 0
+    correct = row["correct"] or 0
+    return {
+        "asked": asked,
+        "correct": correct,
+        "incorrect": asked - correct,
+        "skipped": row["skipped"] or 0,
+        "total": row["total"] or 0,
+        "accuracy": round(correct / asked * 100, 1) if asked else 0.0,
+    }
+
+
+def practice_session_json(conn, row):
+    counts = practice_session_counts(conn, row["id"])
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "topic": row["topic"],
+        "started_at": row["started_at"],
+        "ended_at": row["ended_at"],
+        "asked": counts["asked"],
+        "correct": counts["correct"],
+        "incorrect": counts["incorrect"],
+        "skipped": counts["skipped"],
+        "total": counts["total"],
+        "accuracy": counts["accuracy"],
+    }
+
+
+def list_practice_sessions(conn, completed_only=True):
+    """Every solo practice run, newest first, each with its own totals."""
+    ensure_practice_schema(conn)
+    sql = "SELECT * FROM practice_sessions"
+    if completed_only:
+        sql += " WHERE ended_at IS NOT NULL"
+    sql += " ORDER BY COALESCE(ended_at, started_at) DESC, id DESC"
+    return [practice_session_json(conn, row) for row in conn.execute(sql).fetchall()]
+
+
+def list_practice_attempts(conn, session_id):
+    """Each answer inside one practice run, oldest first, with the question
+    text kept as it was shown, so later bank edits do not rewrite history."""
+    ensure_practice_schema(conn)
+    rows = conn.execute(
+        "SELECT a.id, a.question_id, a.correct, a.skipped, a.created_at, "
+        "a.question_text AS snap_text, a.answer_text AS snap_answer, "
+        "a.topic AS snap_topic, "
+        "q.question_text AS live_text, q.answer_text AS live_answer, q.topic AS live_topic "
+        "FROM practice_attempts a LEFT JOIN questions q ON q.id = a.question_id "
+        "WHERE a.practice_session_id = ? ORDER BY a.id ASC",
+        (session_id,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        if row["skipped"]:
+            result = "skipped"
+        elif row["correct"]:
+            result = "correct"
+        else:
+            result = "incorrect"
+        out.append(
+            {
+                "id": row["id"],
+                "question_id": row["question_id"],
+                "question_text": row["snap_text"] or row["live_text"] or "",
+                "answer_text": row["snap_answer"] or row["live_answer"] or "",
+                "topic": row["snap_topic"] or row["live_topic"] or "",
+                "correct": bool(row["correct"]),
+                "skipped": bool(row["skipped"]),
+                "result": result,
+                "created_at": row["created_at"],
+            }
+        )
+    return out
+
+
+def finish_practice_session(conn, session_id):
+    """Close a practice run. Empty runs are removed so the admin list stays
+    meaningful."""
+    ensure_practice_schema(conn)
+    count = conn.execute(
+        "SELECT COUNT(*) FROM practice_attempts WHERE practice_session_id = ?",
+        (session_id,),
+    ).fetchone()[0]
+    if not count:
+        conn.execute("DELETE FROM practice_sessions WHERE id = ?", (session_id,))
+        return "deleted"
+    conn.execute(
+        "UPDATE practice_sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
+        (now(), session_id),
+    )
+    return "finished"
+
+
+def delete_practice_session(conn, session_id):
+    """Delete one practice run and every answer recorded inside it.
+
+    The question bank and the squadron results are left untouched.
+    """
+    ensure_practice_schema(conn)
+    conn.execute("DELETE FROM practice_attempts WHERE practice_session_id = ?", (session_id,))
+    cur = conn.execute("DELETE FROM practice_sessions WHERE id = ?", (session_id,))
+    return cur.rowcount
+
+
+def has_pending_report_by_name(conn, question_id, name):
+    """A named guest already flagged this question and it is still open."""
+    return conn.execute(
+        "SELECT id FROM reports WHERE question_id = ? AND reported_by IS NULL "
+        "AND reporter_name = ? COLLATE NOCASE AND status = ? LIMIT 1",
+        (question_id, name, REPORT_PENDING),
+    ).fetchone() is not None
 
 
 def overall_stats(conn):

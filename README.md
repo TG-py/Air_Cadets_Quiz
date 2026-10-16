@@ -19,14 +19,32 @@ No external dependencies. Python 3.9+ standard library and SQLite only.
 
 | Role | Can do |
 | --- | --- |
-| Cadet (no login) | Submit new questions on the Submit page, pick an existing topic or add a new one |
+| Cadet (no login) | Practise questions under your own name, submit new questions on the Submit page, pick an existing topic or add a new one |
 | NCO / staff | Log in, ask questions, record correct/incorrect or skip, add questions directly, see progress |
-| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, review reported questions, archive and restore accepted questions, permanently delete questions and their history, flag questions whose answers may change, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, delete all progress |
+| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, review reported questions, archive and restore accepted questions, permanently delete questions and their history, flag questions whose answers may change, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, review solo practice runs, delete all progress |
 
 Only staff/NCO and admins can see questions or record answers - cadets get a 401 on
 those endpoints. Cadets see the Submit page and nothing else.
 
 Submitted questions are never shown in a quiz until an admin approves them.
+
+## Solo practice
+
+Anyone can open *Practise questions* - no account needed. Enter a name,
+pick a topic, and work through the same active question bank on your own.
+The page is styled differently on purpose (green solo-practice banner and
+card) so it cannot be mistaken for asking the squadron.
+
+Practice scores are recorded separately and never touch the squadron
+scoreboard. Admins get a *Practice results* page listing every finished run,
+newest first: who practised, when, and each question with its answer and
+whether it was right, wrong or skipped. A run can be deleted on its own
+after the usual double confirmation.
+
+Anyone practising can report a wrong question from the three-dots menu on
+the card, exactly like NCOs asking the squadron. Signed-in staff report
+under their account name; everyone else gives the name they practised
+under.
 
 While asking questions, NCOs and admins can open the three-dots menu on the
 question card and report a question they think is wrong. The description is

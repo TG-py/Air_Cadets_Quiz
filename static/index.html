@@ -38,9 +38,11 @@
         </div>
         <nav class="main-nav" id="main-nav" hidden>
             <button type="button" class="nav-btn staff-only" data-view="quiz">Ask questions</button>
+            <button type="button" class="nav-btn" data-view="practice">Practise questions</button>
             <button type="button" class="nav-btn hide-for-admin" data-view="submit">Submit a question</button>
             <button type="button" class="nav-btn staff-only" data-view="stats">Progress</button>
             <button type="button" class="nav-btn admin-only" data-view="sessions" hidden>Quiz sessions</button>
+            <button type="button" class="nav-btn admin-only" data-view="practice-results" hidden>Practice results</button>
             <button type="button" class="nav-btn admin-only" data-view="review" hidden>Review <span id="review-badge" class="badge" hidden>0</span></button>
             <button type="button" class="nav-btn admin-only" data-view="reports" hidden>Reports <span id="report-badge" class="badge" hidden>0</span></button>
             <button type="button" class="nav-btn admin-only" data-view="stale" hidden>Out of date <span id="stale-badge" class="badge" hidden>0</span></button>
@@ -125,6 +127,75 @@
             </div>
         </section>
 
+        <section class="view practice-view" id="view-practice" hidden>
+            <h2>Practise questions <span class="practice-pill">SOLO PRACTICE</span></h2>
+            <p class="practice-notice">Solo practice - work through the same question bank on your own. Your score is recorded separately and never touches the squadron scoreboard.</p>
+
+            <div id="practice-start">
+                <form class="card form" id="practice-start-form" autocomplete="on">
+                    <label for="practice-name">Your name</label>
+                    <input type="text" id="practice-name" maxlength="80" autocomplete="name" required
+                           placeholder="Enter your name to begin">
+                    <label for="practice-topic">Topic</label>
+                    <select id="practice-topic">
+                        <option value="">All topics</option>
+                    </select>
+                    <button type="submit" class="primary">Start practising</button>
+                </form>
+            </div>
+
+            <div id="practice-panel" hidden>
+                <div class="quiz-toolbar">
+                    <span class="muted" id="practice-who"></span>
+                    <span class="toolbar-spacer"></span>
+                    <span class="muted" id="practice-progress"></span>
+                    <button type="button" class="link-btn" id="practice-switch">Not you? Switch name</button>
+                </div>
+
+                <div class="card question-card practice-card">
+                    <div class="question-card-head">
+                        <p class="topic-tag" id="practice-topic-tag"></p>
+                        <div class="dots-wrap">
+                            <button type="button" class="dots-btn" id="practice-menu-btn"
+                                    aria-label="Question options" aria-haspopup="menu" aria-expanded="false">&#8942;</button>
+                            <div class="dots-menu" id="practice-menu" hidden role="menu">
+                                <button type="button" id="practice-report-btn" role="menuitem">Report incorrect question</button>
+                            </div>
+                        </div>
+                    </div>
+                    <h2 id="practice-question-text">Loading...</h2>
+                    <div class="answer-block" id="practice-answer-block" hidden>
+                        <p class="answer-label">Answer</p>
+                        <p id="practice-answer-text"></p>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button type="button" class="success" id="practice-correct-btn">Got it right</button>
+                    <button type="button" class="danger" id="practice-incorrect-btn">Got it wrong</button>
+                    <button type="button" class="warn" id="practice-skip-btn">Skip</button>
+                    <button type="button" class="secondary" id="practice-reveal-btn">Show answer</button>
+                    <button type="button" class="primary" id="practice-finish-btn">Finish practice</button>
+                </div>
+            </div>
+
+            <div class="card" id="practice-empty" hidden>
+                <h2 id="practice-empty-title">No questions to practise yet</h2>
+                <p class="muted" id="practice-empty-text"></p>
+                <div class="controls">
+                    <button type="button" class="primary" id="practice-empty-finish" hidden>Finish practice</button>
+                </div>
+            </div>
+
+            <div class="card" id="practice-summary" hidden>
+                <h2>Practice score</h2>
+                <p id="practice-summary-text"></p>
+                <p class="muted">Solo practice only - the squadron scoreboard is untouched.</p>
+                <div class="controls">
+                    <button type="button" class="primary" id="practice-restart">Practise again</button>
+                </div>
+            </div>
+        </section>
+
         <section class="view" id="view-submit" hidden>
             <h2>Submit a question</h2>
             <p class="hint">An instructor reviews every question before it joins the quiz. All four boxes are required.</p>
@@ -172,6 +243,13 @@
             <p class="hint text-box">Every finished quiz is stored on its own. Open a session to see each question that was asked, whether it was correct, incorrect or skipped.</p>
             <div class="accordion" id="sessions-list"></div>
             <p class="muted text-box" id="sessions-empty" hidden>No quiz sessions have been finished yet.</p>
+        </section>
+
+        <section class="view" id="view-practice-results" hidden>
+            <h2>Practice results</h2>
+            <p class="hint text-box">Solo practice runs, kept apart from the squadron scoreboard. Open a run to see who practised and every question, answer and result.</p>
+            <div class="accordion" id="practice-results-list"></div>
+            <p class="muted text-box" id="practice-results-empty" hidden>No finished practice runs yet.</p>
         </section>
 
         <section class="view" id="view-reports" hidden>

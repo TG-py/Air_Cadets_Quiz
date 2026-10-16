@@ -18,6 +18,18 @@ const state = {
     skipped: 0,
     answered: false,
     showAnswer: false,
+    practice: {
+        sessionId: null,
+        name: "",
+        topic: "",
+        question: null,
+        answered: false,
+        showAnswer: false,
+        asked: 0,
+        correct: 0,
+        incorrect: 0,
+        skipped: 0,
+    },
 };
 
 const el = (id) => document.getElementById(id);
@@ -97,6 +109,8 @@ function setView(name) {
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
     if (name === "quiz") ensureQuestion();
+    if (name === "practice") showPractice();
+    if (name === "practice-results") loadPracticeResults();
     if (name === "stats") loadStats();
     if (name === "sessions") loadSessions();
     if (name === "submit") loadSubmitTopics();
@@ -113,6 +127,7 @@ function applyIdentity(payload) {
     if (payload.topics) {
         state.topics = payload.topics;
         renderTopicSelect(el("quiz-topic"), state.topics, "All topics", "");
+        renderTopicSelect(el("practice-topic"), state.topics, "All topics", "");
     }
     if (payload.user !== undefined) state.user = payload.user;
 
@@ -411,6 +426,283 @@ async function recordAnswer(correct, skipped) {
     loadNextQuestion();
 }
 
+// ---- Solo practice: same bank, separate scoreboard, open to everyone ----
+
+function resetPracticeCounters() {
+    state.practice.asked = 0;
+    state.practice.correct = 0;
+    state.practice.incorrect = 0;
+    state.practice.skipped = 0;
+}
+
+function updatePracticeProgress() {
+    const parts = [state.practice.asked + " asked"];
+    if (state.practice.correct) parts.push(state.practice.correct + " right");
+    if (state.practice.incorrect) parts.push(state.practice.incorrect + " wrong");
+    if (state.practice.skipped) parts.push(state.practice.skipped + " skipped");
+    el("practice-progress").textContent = parts.join(" · ");
+}
+
+function showPracticeStart() {
+    el("practice-start").hidden = false;
+    el("practice-panel").hidden = true;
+    el("practice-empty").hidden = true;
+    el("practice-summary").hidden = true;
+}
+
+function showPractice() {
+    clearBanners();
+    if (state.practice.sessionId) {
+        loadPracticeNext();
+    } else {
+        showPracticeStart();
+    }
+}
+
+function renderPracticeQuestion(question) {
+    state.practice.question = question;
+    state.practice.answered = false;
+    setPracticeMenuOpen(false);
+
+    el("practice-question-text").textContent = question.question_text;
+    el("practice-topic-tag").textContent = question.topic;
+    el("practice-topic-tag").hidden = !question.topic;
+    el("practice-answer-text").textContent = question.answer_text || "(no answer recorded)";
+    el("practice-answer-block").hidden = !state.practice.showAnswer;
+    el("practice-reveal-btn").textContent = state.practice.showAnswer ? "Hide answer" : "Show answer";
+    el("practice-who").textContent = "Practising as " + state.practice.name;
+
+    ["practice-correct-btn", "practice-incorrect-btn", "practice-skip-btn"].forEach((id) => {
+        el(id).disabled = false;
+    });
+    updatePracticeProgress();
+}
+
+async function loadPracticeNext() {
+    clearBanners();
+    el("practice-start").hidden = true;
+    el("practice-summary").hidden = true;
+    const params = new URLSearchParams();
+    params.set("practice_session_id", String(state.practice.sessionId));
+    try {
+        const payload = await api("/api/practice/next?" + params.toString());
+        el("practice-empty").hidden = true;
+        el("practice-panel").hidden = false;
+        renderPracticeQuestion(payload.question);
+    } catch (err) {
+        if (err.status === 409) {
+            el("practice-panel").hidden = true;
+            const exhausted = err.reason === "exhausted";
+            el("practice-empty-title").textContent =
+                exhausted ? "You have practised every question" : "No questions to practise yet";
+            el("practice-empty-text").textContent = err.message;
+            el("practice-empty").hidden = false;
+            el("practice-empty-finish").hidden = !(
+                exhausted || state.practice.asked > 0 || state.practice.skipped > 0
+            );
+            return;
+        }
+        if (err.status === 400) {
+            state.practice.sessionId = null;
+            showPracticeStart();
+        }
+        showError(err.message);
+    }
+}
+
+async function recordPracticeAnswer(correct, skipped) {
+    if (!state.practice.question || state.practice.answered) return;
+    const questionId = state.practice.question.id;
+    state.practice.answered = true;
+    ["practice-correct-btn", "practice-incorrect-btn", "practice-skip-btn"].forEach((id) => {
+        el(id).disabled = true;
+    });
+
+    if (!skipped) {
+        state.practice.asked += 1;
+        if (correct) state.practice.correct += 1;
+        else state.practice.incorrect += 1;
+    } else {
+        state.practice.skipped += 1;
+    }
+    updatePracticeProgress();
+
+    try {
+        await api("/api/practice/attempts", {
+            method: "POST",
+            body: {
+                practice_session_id: state.practice.sessionId,
+                question_id: questionId,
+                correct: correct,
+                skipped: skipped,
+            },
+        });
+    } catch (err) {
+        showError("Could not save that answer: " + err.message);
+        ["practice-correct-btn", "practice-incorrect-btn", "practice-skip-btn"].forEach((id) => {
+            el(id).disabled = false;
+        });
+        state.practice.answered = false;
+        return;
+    }
+
+    loadPracticeNext();
+}
+
+async function finishPractice() {
+    clearBanners();
+    try {
+        const payload = await api("/api/practice/finish", {
+            method: "POST",
+            body: { practice_session_id: state.practice.sessionId },
+        });
+        if (!payload.finished || !payload.session) {
+            state.practice.sessionId = null;
+            resetPracticeCounters();
+            showPracticeStart();
+            return;
+        }
+        showPracticeSummary(payload.session);
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+function showPracticeSummary(session) {
+    el("practice-panel").hidden = true;
+    el("practice-empty").hidden = true;
+    el("practice-start").hidden = true;
+    el("practice-summary").hidden = false;
+    const scored = session.correct + session.incorrect;
+    const accuracy = scored ? Math.round((session.correct / scored) * 100) : 0;
+    el("practice-summary-text").textContent =
+        state.practice.name + ": asked " + session.asked +
+        ", right " + session.correct +
+        ", wrong " + session.incorrect +
+        ", skipped " + session.skipped +
+        ". Accuracy " + accuracy + "% of " + scored + " answered question(s).";
+    state.practice.question = null;
+}
+
+async function reportPracticeQuestion() {
+    if (!state.practice.question) return;
+    await sendQuestionReport(
+        state.practice.question.id, "practice-menu", state.practice.name
+    );
+}
+
+function practiceSummaryText(session) {
+    const scored = session.correct + session.incorrect;
+    const accuracy = scored ? Math.round((session.correct / scored) * 100) : 0;
+    return (
+        session.asked +
+        " asked · " +
+        session.correct +
+        " right · " +
+        session.incorrect +
+        " wrong · " +
+        session.skipped +
+        " skipped · " +
+        accuracy +
+        "% accuracy"
+    );
+}
+
+function practiceResultTitle(session) {
+    const when = formatSessionTime(session.ended_at || session.started_at || "");
+    const topic = session.topic ? " · " + session.topic : "";
+    return (session.name || "Someone") + " · " + when + topic;
+}
+
+async function loadPracticeResults() {
+    const box = el("practice-results-list");
+    try {
+        const payload = await api("/api/admin/practice-sessions");
+        box.replaceChildren();
+        const sessions = payload.sessions || [];
+        el("practice-results-empty").hidden = sessions.length > 0;
+        sessions.forEach((session) => {
+            const details = document.createElement("details");
+            details.className = "topic-box";
+
+            const summary = document.createElement("summary");
+            const name = document.createElement("span");
+            name.className = "topic-name";
+            name.textContent = practiceResultTitle(session);
+            const meta = document.createElement("span");
+            meta.className = "topic-meta";
+            meta.textContent = practiceSummaryText(session);
+            summary.appendChild(name);
+            summary.appendChild(meta);
+            details.appendChild(summary);
+
+            const body = document.createElement("div");
+            body.className = "topic-body";
+            const hint = document.createElement("p");
+            hint.className = "muted";
+            hint.textContent = "Loading...";
+            body.appendChild(hint);
+            details.appendChild(body);
+
+            let loaded = false;
+            details.addEventListener("toggle", async () => {
+                if (!details.open || loaded) return;
+                loaded = true;
+                try {
+                    const detail = await api("/api/admin/practice-sessions/" + session.id);
+                    body.replaceChildren();
+                    const list = document.createElement("ul");
+                    list.className = "question-list";
+                    (detail.attempts || []).forEach((attempt) => {
+                        list.appendChild(sessionAttemptItem(attempt));
+                    });
+                    if (!detail.attempts || !detail.attempts.length) {
+                        const empty = document.createElement("p");
+                        empty.className = "muted";
+                        empty.textContent = "No answers recorded in this run.";
+                        body.appendChild(empty);
+                    } else {
+                        body.appendChild(list);
+                    }
+                    body.appendChild(
+                        makeButton("Delete this run", "no", () => deletePracticeResult(session.id))
+                    );
+                } catch (err) {
+                    hint.textContent = err.message;
+                    loaded = false;
+                }
+            });
+
+            box.appendChild(details);
+        });
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function deletePracticeResult(sessionId) {
+    const first = window.confirm(
+        "Delete this practice run?\n\n" +
+            "Every recorded answer in this run will be removed. " +
+            "Questions and the squadron results are kept."
+    );
+    if (!first) return;
+    const second = window.confirm(
+        "This cannot be undone.\n\nClick OK to permanently delete this practice run."
+    );
+    if (!second) return;
+    try {
+        const payload = await api("/api/admin/practice-sessions/" + sessionId + "/delete", {
+            method: "POST",
+            body: { confirm: true },
+        });
+        showOk(payload.message || "That practice run has been deleted.");
+        loadPracticeResults();
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
 function chip(label, className) {
     const span = document.createElement("span");
     span.className = "chip " + className;
@@ -580,34 +872,66 @@ async function refreshAdminBadges() {
     }
 }
 
+function setDotsMenuOpen(menuId, open) {
+    el(menuId).hidden = !open;
+    el(menuId + "-btn").setAttribute("aria-expanded", open ? "true" : "false");
+}
+
 function setQuestionMenuOpen(open) {
-    el("question-menu").hidden = !open;
-    el("question-menu-btn").setAttribute("aria-expanded", open ? "true" : "false");
+    setDotsMenuOpen("question-menu", open);
+}
+
+function setPracticeMenuOpen(open) {
+    setDotsMenuOpen("practice-menu", open);
+}
+
+function closeDotsMenus() {
+    ["question-menu", "practice-menu"].forEach((id) => {
+        if (el(id) && !el(id).hidden) setDotsMenuOpen(id, false);
+    });
 }
 
 async function reportCurrentQuestion() {
     if (!state.question) return;
     setQuestionMenuOpen(false);
+    await sendQuestionReport(state.question.id, null);
+}
+
+async function sendQuestionReport(questionId, menuId, defaultName) {
+    if (menuId) setDotsMenuOpen(menuId, false);
+    const fields = [];
+    // guests report under the name they give; signed-in staff report as themselves
+    if (!state.user && defaultName !== null) {
+        fields.push({
+            id: "reporter_name",
+            label: "Your name",
+            value: defaultName || "",
+            maxlength: 80,
+        });
+    }
+    fields.push({
+        id: "reason",
+        label: "What is wrong? (optional)",
+        value: "",
+        rows: 3,
+        maxlength: 1000,
+        placeholder: "e.g. The answer should be ... because ...",
+    });
     const values = await askForValues({
         title: "Report incorrect question",
         hint: "Say what is wrong if you can - the question, the answer, or both. An admin will check it.",
-        fields: [
-            {
-                id: "reason",
-                label: "What is wrong? (optional)",
-                value: "",
-                rows: 3,
-                maxlength: 1000,
-                placeholder: "e.g. The answer should be ... because ...",
-            },
-        ],
+        fields: fields,
         submitLabel: "Send report",
     });
     if (values === null) return;
+    const body = { reason: values.reason };
+    if (!state.user && defaultName !== null) {
+        body.reporter_name = values.reporter_name;
+    }
     try {
-        const payload = await api("/api/questions/" + state.question.id + "/report", {
+        const payload = await api("/api/questions/" + questionId + "/report", {
             method: "POST",
-            body: { reason: values.reason },
+            body: body,
         });
         showOk(payload.message || "Reported - an admin will check it.");
     } catch (err) {
@@ -1749,15 +2073,19 @@ function bindEvents() {
     });
     el("report-question-btn").addEventListener("click", reportCurrentQuestion);
     document.addEventListener("click", (event) => {
-        if (el("question-menu").hidden) return;
         if (event.target.closest && event.target.closest(".dots-wrap")) return;
-        setQuestionMenuOpen(false);
+        closeDotsMenus();
     });
     document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !el("question-menu").hidden) {
-            setQuestionMenuOpen(false);
+        if (event.key === "Escape") {
+            closeDotsMenus();
         }
     });
+    el("practice-menu-btn").addEventListener("click", (event) => {
+        event.stopPropagation();
+        setPracticeMenuOpen(el("practice-menu").hidden);
+    });
+    el("practice-report-btn").addEventListener("click", reportPracticeQuestion);
     el("finish-btn").addEventListener("click", finishQuizSession);
     el("quiz-empty-finish").addEventListener("click", finishQuizSession);
     window.addEventListener("pagehide", finishOnPageHide);
@@ -1772,6 +2100,77 @@ function bindEvents() {
     el("summary-restart").addEventListener("click", () => {
         resetSessionCounters();
         loadNextQuestion();
+    });
+
+    el("practice-start-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        clearBanners();
+        const name = el("practice-name").value.trim();
+        if (name.length < 2) {
+            showError("Please enter your name before practising.");
+            return;
+        }
+        try {
+            const payload = await api("/api/practice/start", {
+                method: "POST",
+                body: { name: name, topic: el("practice-topic").value },
+            });
+            state.practice.sessionId = payload.practice_session_id;
+            state.practice.name = payload.name;
+            state.practice.topic = payload.topic || "";
+            state.practice.question = null;
+            resetPracticeCounters();
+            loadPracticeNext();
+        } catch (err) {
+            showError(err.message);
+        }
+    });
+
+    el("practice-correct-btn").addEventListener("click", () => recordPracticeAnswer(true, false));
+    el("practice-incorrect-btn").addEventListener("click", () => recordPracticeAnswer(false, false));
+    el("practice-skip-btn").addEventListener("click", () => recordPracticeAnswer(false, true));
+    el("practice-finish-btn").addEventListener("click", finishPractice);
+    el("practice-empty-finish").addEventListener("click", finishPractice);
+
+    el("practice-reveal-btn").addEventListener("click", () => {
+        state.practice.showAnswer = !state.practice.showAnswer;
+        localStorage.setItem("practice.showAnswer", state.practice.showAnswer ? "1" : "0");
+        el("practice-answer-block").hidden = !state.practice.showAnswer;
+        el("practice-reveal-btn").textContent = state.practice.showAnswer ? "Hide answer" : "Show answer";
+    });
+
+    el("practice-restart").addEventListener("click", async () => {
+        // a fresh run under the same name; the old one is already finished
+        try {
+            const payload = await api("/api/practice/start", {
+                method: "POST",
+                body: { name: state.practice.name, topic: state.practice.topic },
+            });
+            state.practice.sessionId = payload.practice_session_id;
+            state.practice.question = null;
+            resetPracticeCounters();
+            loadPracticeNext();
+        } catch (err) {
+            showError(err.message);
+        }
+    });
+
+    el("practice-switch").addEventListener("click", async () => {
+        // switching name ends this run first so the score keeps its name
+        if (state.practice.sessionId) {
+            try {
+                await api("/api/practice/finish", {
+                    method: "POST",
+                    body: { practice_session_id: state.practice.sessionId },
+                });
+            } catch (err) {
+                // an empty or unknown run simply drops away
+            }
+        }
+        state.practice.sessionId = null;
+        state.practice.question = null;
+        resetPracticeCounters();
+        showPracticeStart();
     });
 
     el("bank-search").addEventListener("input", () => loadBank());
@@ -1854,6 +2253,8 @@ async function boot() {
     bindEvents();
     state.showAnswer = localStorage.getItem("quiz.showAnswer") === "1";
     el("reveal-btn").textContent = state.showAnswer ? "Hide answer" : "Show answer";
+    state.practice.showAnswer = localStorage.getItem("practice.showAnswer") === "1";
+    el("practice-reveal-btn").textContent = state.practice.showAnswer ? "Hide answer" : "Show answer";
     try {
         const payload = await api("/api/auth/me");
         applyIdentity(payload);
@@ -1865,7 +2266,7 @@ async function boot() {
                 setView("quiz");
             }
         } else {
-            setView("submit");
+            setView("practice");
         }
     } catch (err) {
         showError("Could not reach the server: " + err.message);
