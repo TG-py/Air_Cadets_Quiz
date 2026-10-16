@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS questions (
     reviewed_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
     reviewed_at   TEXT,
     archived_at   TEXT,
+    outdated      INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS questions_status ON questions(status);
@@ -81,6 +82,21 @@ CREATE TABLE IF NOT EXISTS attempts (
     topic         TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS attempts_question ON attempts(question_id);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id   INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    reported_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reporter_name TEXT NOT NULL DEFAULT '',
+    reason        TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'resolved', 'dismissed')),
+    created_at    TEXT NOT NULL,
+    resolved_at   TEXT,
+    resolved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS reports_question ON reports(question_id);
+CREATE INDEX IF NOT EXISTS reports_status ON reports(status);
 """
 
 
@@ -224,14 +240,157 @@ def init():
         }
         if "archived_at" not in question_columns:
             conn.execute("ALTER TABLE questions ADD COLUMN archived_at TEXT")
+        ensure_outdated_schema(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS questions_archived ON questions(archived_at)"
         )
+        ensure_reports_schema(conn)
         drop_readable_passwords(conn)
         ensure_quiz_session_schema(conn)
         conn.execute("PRAGMA wal_autocheckpoint = 512")
     finally:
         conn.close()
+
+
+def ensure_outdated_schema(conn):
+    """A single tag collecting the questions that may need updating.
+
+    Fresh databases get the column from SCHEMA. Older databases gain it here
+    so nothing in the bank is lost. Flags from the retired flag/note/due-date
+    system are carried across, then those columns are dropped.
+    """
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(questions)")}
+    if "outdated" not in existing:
+        try:
+            conn.execute("ALTER TABLE questions ADD COLUMN outdated INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.Error:
+            pass
+    if "stale_flag" in existing:
+        try:
+            conn.execute(
+                "UPDATE questions SET outdated = 1 WHERE stale_flag = 1 "
+                "OR (stale_due IS NOT NULL AND stale_due != '')"
+            )
+        except sqlite3.Error:
+            pass
+    for column in ("stale_flag", "stale_note", "stale_due", "last_verified_at"):
+        if column in existing:
+            try:
+                conn.execute(f"ALTER TABLE questions DROP COLUMN {column}")
+            except sqlite3.Error:
+                # older sqlite cannot drop a column; it stays, unused and unread
+                pass
+    conn.execute("CREATE INDEX IF NOT EXISTS questions_outdated ON questions(outdated)")
+
+
+REPORT_PENDING = "pending"
+REPORT_RESOLVED = "resolved"
+REPORT_DISMISSED = "dismissed"
+
+
+def ensure_reports_schema(conn):
+    """Let NCOs flag questions they think are wrong while asking them.
+
+    Fresh databases get the table from SCHEMA. Older databases gain it here,
+    so the bank and its history are left untouched.
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS reports ("
+        "    id            INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "    question_id   INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,"
+        "    reported_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,"
+        "    reporter_name TEXT NOT NULL DEFAULT '',"
+        "    reason        TEXT NOT NULL DEFAULT '',"
+        "    status        TEXT NOT NULL DEFAULT 'pending'"
+        "                CHECK (status IN ('pending', 'resolved', 'dismissed')),"
+        "    created_at    TEXT NOT NULL,"
+        "    resolved_at   TEXT,"
+        "    resolved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL"
+        ")"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS reports_question ON reports(question_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS reports_status ON reports(status)")
+
+
+def add_report(conn, question_id, user_id, reporter_name, reason):
+    ensure_reports_schema(conn)
+    cur = conn.execute(
+        "INSERT INTO reports (question_id, reported_by, reporter_name, reason, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (question_id, user_id, reporter_name or "", reason, REPORT_PENDING, now()),
+    )
+    return cur.lastrowid
+
+
+def get_report(conn, report_id):
+    ensure_reports_schema(conn)
+    return conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+
+
+def has_pending_report(conn, question_id, user_id):
+    ensure_reports_schema(conn)
+    row = conn.execute(
+        "SELECT id FROM reports WHERE question_id = ? AND reported_by = ? AND status = ? LIMIT 1",
+        (question_id, user_id, REPORT_PENDING),
+    ).fetchone()
+    return row is not None
+
+
+def list_reports(conn, status="pending", limit=200):
+    """Reports newest first, with the live question text alongside each one."""
+    ensure_reports_schema(conn)
+    base = (
+        "SELECT r.*, q.question_text AS live_text, q.answer_text AS live_answer, "
+        "q.topic AS live_topic, q.status AS live_status, q.archived_at "
+        "FROM reports r LEFT JOIN questions q ON q.id = r.question_id "
+    )
+    if status == "all":
+        sql = base + "ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.id DESC LIMIT ?"
+        args = (limit,)
+    elif status == "resolved":
+        sql = base + "WHERE r.status IN ('resolved', 'dismissed') ORDER BY r.id DESC LIMIT ?"
+        args = (limit,)
+    else:
+        sql = base + "WHERE r.status = 'pending' ORDER BY r.id DESC LIMIT ?"
+        args = (limit,)
+    return conn.execute(sql, args).fetchall()
+
+
+def report_json(row):
+    return {
+        "id": row["id"],
+        "question_id": row["question_id"],
+        "question_text": row["live_text"] or "",
+        "answer_text": row["live_answer"] or "",
+        "topic": row["live_topic"] or "",
+        "question_status": row["live_status"],
+        "question_archived": bool(row["archived_at"]),
+        "question_missing": row["live_text"] is None,
+        "reporter_name": row["reporter_name"] or "",
+        "reason": row["reason"] or "",
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "resolved_at": row["resolved_at"],
+    }
+
+
+def pending_report_count(conn):
+    ensure_reports_schema(conn)
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM reports WHERE status = ?", (REPORT_PENDING,)
+    ).fetchone()
+    return row["n"] or 0
+
+
+def resolve_report(conn, report_id, status, resolver_id):
+    """Mark one report fixed or dismissed. Returns 1 when it was pending."""
+    ensure_reports_schema(conn)
+    cur = conn.execute(
+        "UPDATE reports SET status = ?, resolved_at = ?, resolved_by = ? "
+        "WHERE id = ? AND status = ?",
+        (status, now(), resolver_id, report_id, REPORT_PENDING),
+    )
+    return cur.rowcount
 
 
 def user_count():
@@ -370,6 +529,33 @@ def restore_question(conn, question_id):
         (question_id, Q_APPROVED),
     )
     return cur.rowcount
+
+
+def set_question_outdated(conn, question_id, tagged):
+    """Give or remove a question's out-of-date tag."""
+    ensure_outdated_schema(conn)
+    conn.execute(
+        "UPDATE questions SET outdated = ? WHERE id = ?",
+        (1 if tagged else 0, question_id),
+    )
+
+
+def list_stale(conn, limit=500):
+    """Every tagged question, newest first."""
+    ensure_outdated_schema(conn)
+    return conn.execute(
+        "SELECT * FROM questions WHERE archived_at IS NULL AND outdated = 1 "
+        "ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def stale_count(conn):
+    ensure_outdated_schema(conn)
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM questions WHERE archived_at IS NULL AND outdated = 1"
+    ).fetchone()
+    return row["n"] or 0
 
 
 def rename_topic(conn, old_topic, new_topic):

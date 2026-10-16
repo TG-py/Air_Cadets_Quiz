@@ -1133,12 +1133,12 @@ console.log("EDITWIRING:" + /makeButton\("Edit", "", \(\) => editQuestion\(quest
     buttons = {l.split(":", 1)[0]: l.split(":", 1)[1] for l in bank_out.splitlines()
                if l.split(":", 1)[0] in ("PENDINGBTNS", "APPROVEDBTNS", "REJECTEDBTNS", "ARCHIVEDBTNS", "EDITWIRING")}
     check("a pending question in the bank can be accepted, edited and deleted",
-          buttons.get("PENDINGBTNS") == "Accept,Edit,Delete", buttons.get("PENDINGBTNS", "none"))
+          buttons.get("PENDINGBTNS") == "Accept,Flag out of date,Edit,Delete", buttons.get("PENDINGBTNS", "none"))
     check("an accepted question in the bank can be removed, archived, edited and deleted",
-          buttons.get("APPROVEDBTNS") == "Remove from quiz,Archive,Edit,Delete",
+          buttons.get("APPROVEDBTNS") == "Remove from quiz,Archive,Flag out of date,Edit,Delete",
           buttons.get("APPROVEDBTNS", "none"))
     check("a rejected question in the bank can be accepted, edited and deleted",
-          buttons.get("REJECTEDBTNS") == "Accept,Edit,Delete", buttons.get("REJECTEDBTNS", "none"))
+          buttons.get("REJECTEDBTNS") == "Accept,Flag out of date,Edit,Delete", buttons.get("REJECTEDBTNS", "none"))
     check("an archived question in the bank can be restored, edited and deleted",
           buttons.get("ARCHIVEDBTNS") == "Restore to quiz,Edit,Delete",
           buttons.get("ARCHIVEDBTNS", "none"))

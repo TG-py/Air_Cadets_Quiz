@@ -572,6 +572,63 @@ button {
     border-radius: 999px;
 }
 
+/* three-dots menu on the ask-questions card */
+.question-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.dots-wrap {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.dots-btn {
+    padding: 0.1rem 0.55rem;
+    font-size: 1.2rem;
+    line-height: 1.2;
+    color: var(--muted);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 8px;
+}
+
+.dots-btn:hover {
+    color: var(--text);
+    border-color: var(--border);
+}
+
+.dots-menu {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    right: 0;
+    z-index: 20;
+    min-width: 14rem;
+    padding: 0.3rem;
+    background: var(--card-hover);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.dots-menu button {
+    display: block;
+    width: 100%;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.9rem;
+    text-align: left;
+    color: var(--text);
+    background: none;
+    border: none;
+    border-radius: 6px;
+}
+
+.dots-menu button:hover {
+    background: var(--card-active);
+}
+
 .answer-block {
     margin-top: 1.25rem;
     padding-top: 1rem;

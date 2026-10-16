@@ -6,6 +6,8 @@ const state = {
     user: null,
     csrf: null,
     counts: { approved: 0, pending: 0, rejected: 0, total: 0 },
+    staleCount: 0,
+    reportCount: 0,
     topics: [],
     submitTopics: [],
     question: null,
@@ -99,6 +101,8 @@ function setView(name) {
     if (name === "sessions") loadSessions();
     if (name === "submit") loadSubmitTopics();
     if (name === "review") loadPending();
+    if (name === "reports") loadReports();
+    if (name === "stale") loadStale();
     if (name === "bank") loadBank();
     if (name === "users") loadUsers();
 }
@@ -142,6 +146,27 @@ function applyIdentity(payload) {
     const pending = state.counts.pending || 0;
     badge.textContent = String(pending);
     badge.hidden = pending === 0;
+
+    const staleBadge = el("stale-badge");
+    if (staleBadge) {
+        const staleCount =
+            payload.stale_count !== undefined ? payload.stale_count : state.staleCount || 0;
+        state.staleCount = staleCount;
+        staleBadge.textContent = String(staleCount);
+        staleBadge.hidden = staleCount === 0;
+    }
+    const reportBadge = el("report-badge");
+    if (reportBadge) {
+        const reportCount =
+            payload.report_count !== undefined ? payload.report_count : state.reportCount || 0;
+        state.reportCount = reportCount;
+        reportBadge.textContent = String(reportCount);
+        reportBadge.hidden = reportCount === 0;
+    }
+    if (isAdmin && payload.stale_count === undefined && payload.report_count === undefined &&
+            typeof refreshAdminBadges === "function") {
+        refreshAdminBadges();
+    }
 }
 
 function renderTopicSelect(select, topics, firstLabel, allowNew, requireChoice) {
@@ -228,6 +253,7 @@ function renderQuestion(question) {
     state.question = question;
     state.answered = false;
     document.body.classList.remove("answered-correct", "answered-incorrect");
+    setQuestionMenuOpen(false);
 
     el("question-text").textContent = question.question_text;
     el("question-topic").textContent = question.topic;
@@ -427,6 +453,9 @@ function questionListItem(question, options = {}) {
     if (question.submitted_by) {
         meta.appendChild(chip("from " + question.submitted_by, ""));
     }
+    if (question.outdated) {
+        meta.appendChild(chip("may go out of date", "chip-pending"));
+    }
     if (options.asked !== undefined) {
         meta.appendChild(
             chip(
@@ -474,6 +503,17 @@ function questionActions(question) {
                 makeButton("Archive", "no", () => archiveQuestion(question.id))
             );
         }
+        if (!question.archived_at) {
+            if (question.outdated) {
+                actions.appendChild(
+                    makeButton("Remove flag", "", () => tagOutdated(question.id, false))
+                );
+            } else {
+                actions.appendChild(
+                    makeButton("Flag out of date", "", () => tagOutdated(question.id, true))
+                );
+            }
+        }
         actions.appendChild(makeButton("Edit", "", () => editQuestion(question)));
         actions.appendChild(
             makeButton("Delete", "no", () => deleteQuestion(question.id))
@@ -481,11 +521,228 @@ function questionActions(question) {
     };
 }
 
+async function loadStale() {
+    const list = el("stale-list");
+    try {
+        const payload = await api("/api/admin/stale");
+        applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
+        list.replaceChildren();
+        const items = payload.questions || [];
+        el("stale-empty").hidden = items.length > 0;
+        items.forEach((question) => {
+            list.appendChild(
+                questionListItem(question, {
+                    showAnswer: true,
+                    actions: (_item, actions) => {
+                        actions.appendChild(
+                            makeButton("Remove flag", "", () => tagOutdated(question.id, false))
+                        );
+                        actions.appendChild(makeButton("Edit", "", () => editQuestion(question)));
+                        actions.appendChild(
+                            makeButton("Delete", "no", () => deleteQuestion(question.id))
+                        );
+                    },
+                })
+            );
+        });
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function tagOutdated(questionId, tagged) {
+    try {
+        const payload = await api("/api/admin/questions/" + questionId + "/stale", {
+            method: "POST",
+            body: { tagged: tagged },
+        });
+        applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
+        showOk(tagged ? "Tagged as possibly going out of date." : "Tag removed.");
+        loadBank();
+        if (state.view === "stale") loadStale();
+        else refreshAdminBadges();
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function refreshAdminBadges() {
+    if (!state.user || state.user.role !== "admin") return;
+    try {
+        const payload = await api("/api/admin/stale");
+        applyIdentity({
+            counts: payload.counts,
+            stale_count: payload.stale_count,
+            report_count: payload.report_count,
+        });
+    } catch (err) {
+        // badges stay as they were; the stale view will report the error
+    }
+}
+
+function setQuestionMenuOpen(open) {
+    el("question-menu").hidden = !open;
+    el("question-menu-btn").setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+async function reportCurrentQuestion() {
+    if (!state.question) return;
+    setQuestionMenuOpen(false);
+    const values = await askForValues({
+        title: "Report incorrect question",
+        hint: "Say what is wrong if you can - the question, the answer, or both. An admin will check it.",
+        fields: [
+            {
+                id: "reason",
+                label: "What is wrong? (optional)",
+                value: "",
+                rows: 3,
+                maxlength: 1000,
+                placeholder: "e.g. The answer should be ... because ...",
+            },
+        ],
+        submitLabel: "Send report",
+    });
+    if (values === null) return;
+    try {
+        const payload = await api("/api/questions/" + state.question.id + "/report", {
+            method: "POST",
+            body: { reason: values.reason },
+        });
+        showOk(payload.message || "Reported - an admin will check it.");
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+function reportListItem(report, handled) {
+    const item = document.createElement("li");
+
+    const text = document.createElement("p");
+    text.className = "q-text";
+    text.textContent = report.question_text || "(question removed)";
+    item.appendChild(text);
+
+    if (report.answer_text) {
+        const answer = document.createElement("p");
+        answer.className = "q-text muted";
+        answer.textContent = "Answer: " + report.answer_text;
+        item.appendChild(answer);
+    }
+
+    if (report.reason) {
+        const reason = document.createElement("p");
+        reason.className = "q-text muted";
+        reason.textContent = "Report: " + report.reason;
+        item.appendChild(reason);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "q-meta";
+    if (report.topic) meta.appendChild(chip(report.topic, ""));
+    meta.appendChild(
+        chip(
+            report.status,
+            report.status === "pending"
+                ? "chip-pending"
+                : report.status === "resolved"
+                  ? "chip-approved"
+                  : "chip-rejected"
+        )
+    );
+    if (report.reporter_name) meta.appendChild(chip("from " + report.reporter_name, ""));
+    if (report.created_at) meta.appendChild(chip(formatSessionTime(report.created_at), ""));
+    item.appendChild(meta);
+
+    if (!handled) {
+        const actions = document.createElement("div");
+        actions.className = "q-actions";
+        actions.appendChild(
+            makeButton("Mark fixed", "ok", () => resolveReport(report.id, "resolved"))
+        );
+        actions.appendChild(
+            makeButton("Dismiss", "no", () => resolveReport(report.id, "dismissed"))
+        );
+        if (!report.question_missing && !report.question_archived) {
+            actions.appendChild(
+                makeButton("Edit", "", () =>
+                    editQuestion({
+                        id: report.question_id,
+                        question_text: report.question_text,
+                        answer_text: report.answer_text,
+                        topic: report.topic,
+                    })
+                )
+            );
+        }
+        item.appendChild(actions);
+    }
+    return item;
+}
+
+async function loadReports() {
+    const list = el("reports-list");
+    try {
+        const payload = await api("/api/admin/reports?status=pending");
+        applyIdentity({
+            counts: payload.counts,
+            stale_count: payload.stale_count,
+            report_count: payload.report_count,
+        });
+        list.replaceChildren();
+        const items = payload.reports || [];
+        el("reports-empty").hidden = items.length > 0;
+        items.forEach((report) => {
+            list.appendChild(reportListItem(report, false));
+        });
+        loadResolvedReports();
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function loadResolvedReports() {
+    const box = el("reports-resolved-box");
+    const list = el("reports-resolved-list");
+    try {
+        const payload = await api("/api/admin/reports?status=resolved");
+        list.replaceChildren();
+        const items = payload.reports || [];
+        box.hidden = items.length === 0;
+        el("reports-resolved-meta").textContent =
+            items.length + (items.length === 1 ? " handled" : " handled");
+        items.slice(0, 50).forEach((report) => {
+            list.appendChild(reportListItem(report, true));
+        });
+    } catch (err) {
+        // the pending list already loaded; leave the handled group as it was
+    }
+}
+
+async function resolveReport(reportId, action) {
+    try {
+        const payload = await api("/api/admin/reports/" + reportId + "/resolve", {
+            method: "POST",
+            body: { action: action },
+        });
+        applyIdentity({
+            counts: payload.counts,
+            stale_count: payload.stale_count,
+            report_count: payload.report_count,
+        });
+        showOk(action === "resolved" ? "Report marked fixed." : "Report dismissed.");
+        if (state.view === "reports") loadReports();
+        else refreshAdminBadges();
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
 async function loadPending() {
     const list = el("review-list");
     try {
         const payload = await api("/api/admin/pending");
-        applyIdentity({ counts: payload.counts });
+        applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
         list.replaceChildren();
         const items = payload.questions;
         el("review-empty").hidden = items.length > 0;
@@ -524,7 +781,7 @@ async function review(questionId, status) {
             "/api/admin/questions/" + questionId + "/" + status,
             { method: "POST", body: {} }
         );
-        applyIdentity({ counts: payload.counts });
+        applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
         showOk(status === "approve" ? "Question accepted." : "Question rejected.");
         await loadPending();
     } catch (err) {
@@ -625,6 +882,9 @@ async function editQuestion(question) {
         showOk("Question updated.");
         loadPending();
         loadBank();
+        if (state.view === "stale") loadStale();
+        else if (state.view === "reports") loadReports();
+        else refreshAdminBadges();
     } catch (err) {
         showError(err.message);
     }
@@ -639,10 +899,12 @@ async function deleteQuestion(questionId) {
             method: "POST",
             body: {},
         });
-        applyIdentity({ counts: payload.counts });
+        applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
         showOk("Question deleted.");
         loadPending();
         loadBank();
+        if (state.view === "stale") loadStale();
+        else if (state.view === "reports") loadReports();
     } catch (err) {
         showError(err.message);
     }
@@ -751,7 +1013,7 @@ async function loadBank() {
     if (search) params.set("q", search);
     try {
         const payload = await api("/api/questions?" + params.toString());
-        applyIdentity({ counts: payload.counts, topics: payload.topics });
+        applyIdentity({ counts: payload.counts, topics: payload.topics, stale_count: payload.stale_count, report_count: payload.report_count });
         list.replaceChildren();
         if (!payload.questions.length) {
             const empty = document.createElement("p");
@@ -785,7 +1047,7 @@ async function reviewFromBank(questionId, status) {
             method: "POST",
             body: {},
         });
-        applyIdentity({ counts: payload.counts });
+        applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
         showOk("Updated.");
         loadBank();
     } catch (err) {
@@ -802,7 +1064,7 @@ async function archiveQuestion(questionId) {
             method: "POST",
             body: {},
         });
-        applyIdentity({ counts: payload.counts });
+        applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
         showOk("Question archived. Its answer history has been kept.");
         await loadBank();
     } catch (err) {
@@ -816,7 +1078,7 @@ async function restoreQuestion(questionId) {
             method: "POST",
             body: {},
         });
-        applyIdentity({ counts: payload.counts });
+        applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
         showOk("Question restored to the quiz with its previous history.");
         await loadBank();
     } catch (err) {
@@ -1481,6 +1743,21 @@ function bindEvents() {
     el("correct-btn").addEventListener("click", () => recordAnswer(true, false));
     el("incorrect-btn").addEventListener("click", () => recordAnswer(false, false));
     el("skip-btn").addEventListener("click", () => recordAnswer(false, true));
+    el("question-menu-btn").addEventListener("click", (event) => {
+        event.stopPropagation();
+        setQuestionMenuOpen(el("question-menu").hidden);
+    });
+    el("report-question-btn").addEventListener("click", reportCurrentQuestion);
+    document.addEventListener("click", (event) => {
+        if (el("question-menu").hidden) return;
+        if (event.target.closest && event.target.closest(".dots-wrap")) return;
+        setQuestionMenuOpen(false);
+    });
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !el("question-menu").hidden) {
+            setQuestionMenuOpen(false);
+        }
+    });
     el("finish-btn").addEventListener("click", finishQuizSession);
     el("quiz-empty-finish").addEventListener("click", finishQuizSession);
     window.addEventListener("pagehide", finishOnPageHide);
@@ -1522,7 +1799,7 @@ function bindEvents() {
             el("add-question-form").reset();
             renderTopicSelect(el("bank-topic"), state.topics, "Choose a topic...", true, true);
             showOk("Added to the bank.");
-            if (payload.counts) applyIdentity({ counts: payload.counts });
+            if (payload.counts) applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
             loadBank();
         } catch (err) {
             showError(err.message);
@@ -1542,7 +1819,7 @@ function bindEvents() {
                 method: "POST",
                 body: { content: content, format: el("import-format").value },
             });
-            applyIdentity({ counts: payload.counts });
+            applyIdentity({ counts: payload.counts, stale_count: payload.stale_count, report_count: payload.report_count });
             el("import-content").value = "";
             showOk(payload.message);
             loadBank();

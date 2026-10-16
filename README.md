@@ -21,12 +21,18 @@ No external dependencies. Python 3.9+ standard library and SQLite only.
 | --- | --- |
 | Cadet (no login) | Submit new questions on the Submit page, pick an existing topic or add a new one |
 | NCO / staff | Log in, ask questions, record correct/incorrect or skip, add questions directly, see progress |
-| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, archive and restore accepted questions, permanently delete questions and their history, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, delete all progress |
+| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, review reported questions, archive and restore accepted questions, permanently delete questions and their history, flag questions whose answers may change, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, delete all progress |
 
 Only staff/NCO and admins can see questions or record answers - cadets get a 401 on
 those endpoints. Cadets see the Submit page and nothing else.
 
 Submitted questions are never shown in a quiz until an admin approves them.
+
+While asking questions, NCOs and admins can open the three-dots menu on the
+question card and report a question they think is wrong. The description is
+optional - a bare flag is enough. Reports land on the admin *Reports* page,
+newest first, where each one can be marked fixed or dismissed
+after checking the bank.
 
 ## Running it
 
@@ -125,6 +131,12 @@ questions are removed from the quiz but keep their answer history; restoring
 one puts it back into the quiz with that history intact. Permanent deletion is
 separate and removes the question's recorded attempts and their references in
 quiz sessions.
+
+Some answers change over time - names of office holders, numbers, equipment.
+Admins can tag such a question from the bank with "Flag out of date". The
+*Out of date* page collects every tagged question in one place so nothing
+slips through; removing the tag takes it back off the list. Tagged
+questions stay in the quiz throughout.
 
 ## Quiz sessions
 

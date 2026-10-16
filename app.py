@@ -76,12 +76,16 @@ def issue_guest_session(ctx):
 
 def api_me(ctx):
     csrf = ctx.session["csrf"] if ctx.session else issue_guest_session(ctx)
-    return {
+    payload = {
         "user": auth.public_user(ctx.user),
         "csrf": csrf,
         "counts": db.question_counts(ctx.conn),
         "topics": db.list_topics(ctx.conn),
     }
+    if ctx.user and ctx.user["role"] == db.USER_ADMIN:
+        payload["stale_count"] = db.stale_count(ctx.conn)
+        payload["report_count"] = db.pending_report_count(ctx.conn)
+    return payload
 
 
 def api_login(ctx):
@@ -262,6 +266,7 @@ def question_json(row, include_private=True):
         "status": row["status"],
         "archived_at": row["archived_at"],
         "created_at": row["created_at"],
+        "outdated": bool(row["outdated"]),
     }
     if include_private:
         out.update(
@@ -291,11 +296,15 @@ def api_list_questions(ctx):
         search=(ctx.q("q") or "").strip() or None,
         include_archived=include_archived,
     )
-    return {
+    payload = {
         "questions": [question_json(r) for r in rows],
         "counts": db.question_counts(ctx.conn),
         "topics": db.list_topics(ctx.conn),
     }
+    if ctx.user and ctx.user["role"] == db.USER_ADMIN:
+        payload["stale_count"] = db.stale_count(ctx.conn)
+        payload["report_count"] = db.pending_report_count(ctx.conn)
+    return payload
 
 
 SUBMIT_FIELDS = (
@@ -355,6 +364,8 @@ def api_pending(ctx):
     return {
         "questions": [question_json(r) for r in db.list_pending(ctx.conn)],
         "counts": db.question_counts(ctx.conn),
+        "stale_count": db.stale_count(ctx.conn),
+        "report_count": db.pending_report_count(ctx.conn),
     }
 
 
@@ -374,7 +385,9 @@ def api_review(ctx):
         ctx.user["id"],
         note,
     )
-    return {"ok": True, "counts": db.question_counts(ctx.conn)}
+    return {"ok": True, "counts": db.question_counts(ctx.conn),
+            "stale_count": db.stale_count(ctx.conn),
+            "report_count": db.pending_report_count(ctx.conn)}
 
 
 def api_delete_question(ctx):
@@ -382,7 +395,9 @@ def api_delete_question(ctx):
     if not db.get_question(ctx.conn, question_id):
         raise ApiError(HTTPStatus.NOT_FOUND, "question not found")
     db.delete_question(ctx.conn, question_id)
-    return {"ok": True, "counts": db.question_counts(ctx.conn)}
+    return {"ok": True, "counts": db.question_counts(ctx.conn),
+            "stale_count": db.stale_count(ctx.conn),
+            "report_count": db.pending_report_count(ctx.conn)}
 
 
 def api_archive_question(ctx):
@@ -392,14 +407,90 @@ def api_archive_question(ctx):
             HTTPStatus.CONFLICT,
             "only an accepted question can be archived",
         )
-    return {"ok": True, "counts": db.question_counts(ctx.conn)}
+    return {"ok": True, "counts": db.question_counts(ctx.conn),
+            "stale_count": db.stale_count(ctx.conn),
+            "report_count": db.pending_report_count(ctx.conn)}
 
 
 def api_restore_question(ctx):
     question_id = int(ctx.match.group("id"))
     if not db.restore_question(ctx.conn, question_id):
         raise ApiError(HTTPStatus.CONFLICT, "question is not archived")
-    return {"ok": True, "counts": db.question_counts(ctx.conn)}
+    return {"ok": True, "counts": db.question_counts(ctx.conn),
+            "stale_count": db.stale_count(ctx.conn),
+            "report_count": db.pending_report_count(ctx.conn)}
+
+
+def api_list_stale(ctx):
+    rows = db.list_stale(ctx.conn)
+    return {
+        "questions": [question_json(r) for r in rows],
+        "counts": db.question_counts(ctx.conn),
+        "stale_count": db.stale_count(ctx.conn),
+        "report_count": db.pending_report_count(ctx.conn),
+    }
+
+
+def api_set_stale(ctx):
+    question_id = int(ctx.match.group("id"))
+    question = db.get_question(ctx.conn, question_id)
+    if not question or question["archived_at"]:
+        raise ApiError(HTTPStatus.NOT_FOUND, "question not found")
+    tagged = bool(ctx.body.get("tagged"))
+    db.set_question_outdated(ctx.conn, question_id, tagged)
+    return {"ok": True, "counts": db.question_counts(ctx.conn),
+            "stale_count": db.stale_count(ctx.conn),
+            "report_count": db.pending_report_count(ctx.conn)}
+
+
+def api_report_question(ctx):
+    # NCOs spot wrong questions while asking them; the report lands with the admin
+    question_id = int(ctx.match.group("id"))
+    question = db.get_question(ctx.conn, question_id)
+    if not question or question["status"] != db.Q_APPROVED or question["archived_at"]:
+        raise bad_request("unknown question")
+    reason = (ctx.body.get("reason") or "").strip() if isinstance(ctx.body.get("reason"), str) else ""
+    if len(reason) > 1000:
+        raise bad_request("report is too long (max 1000 characters)")
+    if db.has_pending_report(ctx.conn, question_id, ctx.user["id"]):
+        raise ApiError(HTTPStatus.CONFLICT, "you have already reported this question")
+    db.add_report(
+        ctx.conn,
+        question_id,
+        ctx.user["id"],
+        ctx.user["display_name"] or ctx.user["username"],
+        reason,
+    )
+    return {"ok": True, "message": "reported - an admin will check it"}
+
+
+def api_list_reports(ctx):
+    status = (ctx.q("status") or "pending").strip().lower()
+    if status not in ("pending", "resolved", "all"):
+        raise bad_request("unknown report status")
+    rows = db.list_reports(ctx.conn, status)
+    return {
+        "reports": [db.report_json(r) for r in rows],
+        "counts": db.question_counts(ctx.conn),
+        "stale_count": db.stale_count(ctx.conn),
+        "report_count": db.pending_report_count(ctx.conn),
+    }
+
+
+def api_resolve_report(ctx):
+    report_id = int(ctx.match.group("id"))
+    report = db.get_report(ctx.conn, report_id)
+    if not report:
+        raise ApiError(HTTPStatus.NOT_FOUND, "report not found")
+    action = (ctx.body.get("action") or "resolved").strip().lower() \
+        if isinstance(ctx.body.get("action"), str) else "resolved"
+    if action not in ("resolved", "dismissed"):
+        raise bad_request("action must be resolved or dismissed")
+    if not db.resolve_report(ctx.conn, report_id, action, ctx.user["id"]):
+        raise ApiError(HTTPStatus.CONFLICT, "that report is already handled")
+    return {"ok": True, "counts": db.question_counts(ctx.conn),
+            "stale_count": db.stale_count(ctx.conn),
+            "report_count": db.pending_report_count(ctx.conn)}
 
 
 def api_edit_question(ctx):
@@ -719,6 +810,11 @@ ROUTES = [
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/delete$", api_delete_question, "admin"),
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/archive$", api_archive_question, "admin"),
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/restore$", api_restore_question, "admin"),
+    ("GET", r"^/api/admin/stale$", api_list_stale, "admin"),
+    ("POST", r"^/api/admin/questions/(?P<id>\d+)/stale$", api_set_stale, "admin"),
+    ("POST", r"^/api/questions/(?P<id>\d+)/report$", api_report_question, "staff"),
+    ("GET", r"^/api/admin/reports$", api_list_reports, "admin"),
+    ("POST", r"^/api/admin/reports/(?P<id>\d+)/resolve$", api_resolve_report, "admin"),
     ("POST", r"^/api/admin/questions/(?P<id>\d+)/edit$", api_edit_question, "admin"),
     ("POST", r"^/api/admin/import$", import_questions, "admin"),
     ("GET", r"^/api/admin/users$", api_list_users, "admin"),

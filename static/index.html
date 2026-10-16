@@ -42,6 +42,8 @@
             <button type="button" class="nav-btn staff-only" data-view="stats">Progress</button>
             <button type="button" class="nav-btn admin-only" data-view="sessions" hidden>Quiz sessions</button>
             <button type="button" class="nav-btn admin-only" data-view="review" hidden>Review <span id="review-badge" class="badge" hidden>0</span></button>
+            <button type="button" class="nav-btn admin-only" data-view="reports" hidden>Reports <span id="report-badge" class="badge" hidden>0</span></button>
+            <button type="button" class="nav-btn admin-only" data-view="stale" hidden>Out of date <span id="stale-badge" class="badge" hidden>0</span></button>
             <button type="button" class="nav-btn admin-only" data-view="bank" hidden>Question bank</button>
             <button type="button" class="nav-btn admin-only" data-view="users" hidden>Staff/NCO accounts</button>
         </nav>
@@ -81,7 +83,16 @@
 
             <div id="quiz-panel">
                 <div class="card question-card">
-                    <p class="topic-tag" id="question-topic"></p>
+                    <div class="question-card-head">
+                        <p class="topic-tag" id="question-topic"></p>
+                        <div class="dots-wrap">
+                            <button type="button" class="dots-btn" id="question-menu-btn"
+                                    aria-label="Question options" aria-haspopup="menu" aria-expanded="false">&#8942;</button>
+                            <div class="dots-menu" id="question-menu" hidden role="menu">
+                                <button type="button" id="report-question-btn" role="menuitem">Report incorrect question</button>
+                            </div>
+                        </div>
+                    </div>
                     <h2 id="question-text">Loading...</h2>
                     <div class="answer-block" id="answer-block" hidden>
                         <p class="answer-label">Answer</p>
@@ -161,6 +172,24 @@
             <p class="hint text-box">Every finished quiz is stored on its own. Open a session to see each question that was asked, whether it was correct, incorrect or skipped.</p>
             <div class="accordion" id="sessions-list"></div>
             <p class="muted text-box" id="sessions-empty" hidden>No quiz sessions have been finished yet.</p>
+        </section>
+
+        <section class="view" id="view-reports" hidden>
+            <h2>Reported questions</h2>
+            <p class="hint text-box">Questions NCOs flagged while asking them as possibly wrong. Check the bank, fix the question if needed, then mark the report fixed or dismiss it.</p>
+            <ul class="question-list" id="reports-list"></ul>
+            <p class="muted text-box" id="reports-empty" hidden>Nothing reported.</p>
+            <details class="topic-box" id="reports-resolved-box" hidden>
+                <summary><span class="topic-name">Handled</span><span class="topic-meta" id="reports-resolved-meta"></span></summary>
+                <div class="topic-body"><ul class="question-list" id="reports-resolved-list"></ul></div>
+            </details>
+        </section>
+
+        <section class="view" id="view-stale" hidden>
+            <h2>Out of date questions</h2>
+            <p class="hint text-box">Tag questions whose answers may change - names, numbers, roles, equipment. Tagged questions collect here so nothing slips through. Remove the tag once you have confirmed the answer.</p>
+            <ul class="question-list" id="stale-list"></ul>
+            <p class="muted text-box" id="stale-empty" hidden>Nothing tagged. Use "Flag out of date" on any question in the bank to collect it here.</p>
         </section>
 
         <section class="view" id="view-bank" hidden>
