@@ -25,40 +25,52 @@
                 <circle cx="50" cy="50" r="20" fill="#c8102e"/>
             </svg>
         </h1>
+        <div class="header-messages" aria-live="polite">
+            <p class="banner banner-error" id="global-error" role="alert" hidden></p>
+            <p class="banner banner-ok" id="global-ok" role="status" hidden></p>
+        </div>
+        <button type="button" class="menu-toggle" id="menu-toggle"
+                aria-controls="side-menu" aria-expanded="false" aria-label="Open menu">&#9776;</button>
     </header>
-
-    <button type="button" class="menu-toggle" id="menu-toggle"
-            aria-controls="side-menu" aria-expanded="false" aria-label="Open menu">&#9776;</button>
     <div class="menu-overlay" id="menu-overlay" hidden></div>
     <aside class="side-menu" id="side-menu" aria-label="Main menu">
         <div class="side-menu-head">
-            <span class="side-menu-title">Menu</span>
-            <button type="button" class="side-menu-close" id="menu-close"
-                    aria-label="Close menu">&times;</button>
+            <svg class="rail-roundel" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                <circle cx="50" cy="50" r="48" fill="#1f5fbf"/>
+                <circle cx="50" cy="50" r="34" fill="#ffffff"/>
+                <circle cx="50" cy="50" r="20" fill="#c8102e"/>
+            </svg>
+            <span class="side-menu-title">RAFAC QUESTIONS<small>Squadron learning</small></span>
+            <button type="button" class="menu-issue-btn" id="menu-issue-btn" aria-label="Report a website issue" title="Report a website issue">&#8942;</button>
         </div>
         <nav class="main-nav" id="main-nav" hidden>
-            <button type="button" class="nav-btn staff-only" data-view="quiz">Ask questions</button>
-            <button type="button" class="nav-btn" data-view="practice">Practise questions</button>
-            <button type="button" class="nav-btn hide-for-admin" data-view="submit">Submit a question</button>
-            <button type="button" class="nav-btn staff-only" data-view="stats">Progress</button>
-            <button type="button" class="nav-btn admin-only" data-view="sessions" hidden>Quiz sessions</button>
-            <button type="button" class="nav-btn admin-only" data-view="practice-results" hidden>Practice results</button>
-            <button type="button" class="nav-btn admin-only" data-view="review" hidden>Review <span id="review-badge" class="badge" hidden>0</span></button>
-            <button type="button" class="nav-btn admin-only" data-view="reports" hidden>Reports <span id="report-badge" class="badge" hidden>0</span></button>
-            <button type="button" class="nav-btn admin-only" data-view="stale" hidden>Out of date <span id="stale-badge" class="badge" hidden>0</span></button>
-            <button type="button" class="nav-btn admin-only" data-view="bank" hidden>Question bank</button>
-            <button type="button" class="nav-btn admin-only" data-view="users" hidden>Staff/NCO accounts</button>
+            <div class="nav-section">
+                <p class="nav-section-label">Learning</p>
+                <button type="button" class="nav-btn staff-only" data-view="quiz">Ask questions</button>
+                <button type="button" class="nav-btn" data-view="practice">Practise questions</button>
+                <button type="button" class="nav-btn hide-for-admin" data-view="submit">Submit a question</button>
+            </div>
+            <div class="nav-section admin-only" hidden>
+                <p class="nav-section-label">Progress</p>
+                <button type="button" class="nav-btn admin-only" data-view="stats" hidden>Squadron progress</button>
+                <button type="button" class="nav-btn admin-only" id="progress-trends-nav" data-view="progress-trends" hidden>Progress trends</button>
+                <button type="button" class="nav-btn admin-only" data-view="sessions" hidden>Quiz sessions</button>
+                <button type="button" class="nav-btn admin-only" data-view="practice-results" hidden>Practice results</button>
+            </div>
+            <div class="nav-section admin-only" hidden>
+                <p class="nav-section-label">Admin</p>
+                <button type="button" class="nav-btn admin-only" id="question-review-toggle" data-view="board" hidden aria-controls="view-board">All questions <span id="review-badge" class="badge" hidden>0</span></button>
+                <button type="button" class="nav-btn admin-only" data-view="website-issues" hidden>Website issue reports</button>
+                <button type="button" class="nav-btn admin-only" data-view="users" hidden>Staff/NCO accounts</button>
+            </div>
         </nav>
         <div class="session-bar" id="session-bar">
             <span id="who"></span>
             <button type="button" class="link-btn" id="login-link">Staff/NCO login</button>
-            <button type="button" class="link-btn" id="change-password-btn" hidden>Change password</button>
+            <button type="button" class="link-btn admin-only" id="change-password-btn" hidden>Change password</button>
             <button type="button" class="link-btn" id="logout-btn" hidden>Log out</button>
         </div>
     </aside>
-
-    <p class="banner banner-error" id="global-error" hidden></p>
-    <p class="banner banner-ok" id="global-ok" hidden></p>
 
     <main>
         <section class="view" id="view-login" hidden>
@@ -74,6 +86,11 @@
         </section>
 
         <section class="view" id="view-quiz" hidden>
+            <header class="page-heading">
+                <p class="eyebrow">Squadron knowledge check</p>
+                <h2>Ask the squadron</h2>
+                <p>One question at a time. Build confidence together.</p>
+            </header>
             <div class="quiz-toolbar">
                 <label class="inline-label" for="quiz-topic">Topic</label>
                 <select id="quiz-topic">
@@ -89,9 +106,9 @@
                         <p class="topic-tag" id="question-topic"></p>
                         <div class="dots-wrap">
                             <button type="button" class="dots-btn" id="question-menu-btn"
-                                    aria-label="Question options" aria-haspopup="menu" aria-expanded="false">&#8942;</button>
-                            <div class="dots-menu" id="question-menu" hidden role="menu">
-                                <button type="button" id="report-question-btn" role="menuitem">Report incorrect question</button>
+                                    aria-label="Question options" aria-controls="question-menu" aria-expanded="false">&#8942;</button>
+                            <div class="dots-menu" id="question-menu" hidden>
+                                <button type="button" id="report-question-btn">Report incorrect question</button>
                             </div>
                         </div>
                     </div>
@@ -105,7 +122,6 @@
                     <button type="button" class="success" id="correct-btn">Correct</button>
                     <button type="button" class="danger" id="incorrect-btn">Incorrect</button>
                     <button type="button" class="warn" id="skip-btn">Skip</button>
-                    <button type="button" class="secondary" id="reveal-btn">Show answer</button>
                     <button type="button" class="primary" id="finish-btn">Finish</button>
                 </div>
             </div>
@@ -129,7 +145,7 @@
 
         <section class="view practice-view" id="view-practice" hidden>
             <h2>Practise questions <span class="practice-pill">SOLO PRACTICE</span></h2>
-            <p class="practice-notice">Solo practice - work through the same question bank on your own. Your score is recorded separately and never touches the squadron scoreboard.</p>
+            <p class="practice-notice">Solo practice - work through the same question bank on your own.</p>
 
             <div id="practice-start">
                 <form class="card form" id="practice-start-form" autocomplete="on">
@@ -157,9 +173,9 @@
                         <p class="topic-tag" id="practice-topic-tag"></p>
                         <div class="dots-wrap">
                             <button type="button" class="dots-btn" id="practice-menu-btn"
-                                    aria-label="Question options" aria-haspopup="menu" aria-expanded="false">&#8942;</button>
-                            <div class="dots-menu" id="practice-menu" hidden role="menu">
-                                <button type="button" id="practice-report-btn" role="menuitem">Report incorrect question</button>
+                                    aria-label="Question options" aria-controls="practice-menu" aria-expanded="false">&#8942;</button>
+                            <div class="dots-menu" id="practice-menu" hidden>
+                                <button type="button" id="practice-report-btn">Report incorrect question</button>
                             </div>
                         </div>
                     </div>
@@ -214,7 +230,7 @@
         </section>
 
         <section class="view" id="view-stats" hidden>
-            <h2>Progress</h2>
+            <h2>Squadron progress</h2>
             <h3 class="section-label">Squadron overall</h3>
             <div class="stat-row" id="overall-stats"></div>
             <h3 class="section-label">By topic</h3>
@@ -229,6 +245,22 @@
                 </p>
                 <button type="button" class="no" id="reset-progress-btn">Delete all progress</button>
             </div>
+        </section>
+
+        <section class="view admin-only" id="view-progress-trends" hidden>
+            <h2>Progress trends</h2>
+            <p class="hint text-box">Squadron quiz results by week for the last 12 weeks. Accuracy excludes skipped questions.</p>
+            <p class="muted text-box" id="trends-empty" hidden>No squadron quiz results have been recorded in this period.</p>
+            <section class="trend-card card" aria-labelledby="trend-volume-title">
+                <h3 id="trend-volume-title">Answers recorded each week</h3>
+                <p class="muted">Correct, incorrect, and skipped answers.</p>
+                <div id="trend-volume-chart"></div>
+            </section>
+            <section class="trend-card card" aria-labelledby="trend-accuracy-title">
+                <h3 id="trend-accuracy-title">Weekly accuracy</h3>
+                <p class="muted">Weeks with fewer than 5 scored answers are omitted to avoid over-reading small samples.</p>
+                <div id="trend-accuracy-chart"></div>
+            </section>
         </section>
 
         <section class="view" id="view-review" hidden>
@@ -252,49 +284,130 @@
             <p class="muted text-box" id="practice-results-empty" hidden>No finished practice runs yet.</p>
         </section>
 
-        <section class="view" id="view-reports" hidden>
-            <h2>Reported questions</h2>
-            <p class="hint text-box">Questions NCOs flagged while asking them as possibly wrong. Check the bank, fix the question if needed, then mark the report fixed or dismiss it.</p>
-            <ul class="question-list" id="reports-list"></ul>
-            <p class="muted text-box" id="reports-empty" hidden>Nothing reported.</p>
+        <section class="view" id="view-checks" hidden>
+            <h2>Reports &amp; flagged updates</h2>
+            <p class="hint text-box">Review reported questions and questions already marked for future updates together. The AI prompt contains both groups, and its results are sorted into approval, future-update, and human-review queues.</p>
+            <div class="card form">
+                <p class="hint">Create one prompt for all pending reports and flagged questions, then paste the CSV response below.</p>
+                <button type="button" id="checks-prompt-btn">Create combined AI prompt</button>
+                <h3 class="section-label">Flagged for future updates</h3>
+                <ul class="question-list" id="stale-list"></ul>
+                <p class="muted text-box" id="stale-empty" hidden>Nothing is currently flagged for future updates.</p>
+                <h3 class="section-label">Reported questions</h3>
+                <ul class="question-list" id="reports-list"></ul>
+                <p class="muted text-box" id="reports-empty" hidden>Nothing reported.</p>
+                <form class="form" id="checks-import-form">
+                    <label for="checks-content">Apply combined review results</label>
+                    <p class="hint">CSV columns: id,report_ids,action,question,answer,topic,reason. Use update, flag, review, ok, or dismiss.</p>
+                    <textarea id="checks-content" rows="7" placeholder="id,report_ids,action,question,answer,topic,reason"></textarea>
+                    <button type="submit" class="primary">Apply combined results</button>
+                </form>
+            </div>
             <details class="topic-box" id="reports-resolved-box" hidden>
                 <summary><span class="topic-name">Handled</span><span class="topic-meta" id="reports-resolved-meta"></span></summary>
                 <div class="topic-body"><ul class="question-list" id="reports-resolved-list"></ul></div>
             </details>
-        </section>
-
-        <section class="view" id="view-stale" hidden>
-            <h2>Out of date questions</h2>
-            <p class="hint text-box">Tag questions whose answers may change - names, numbers, roles, equipment. Tagged questions collect here so nothing slips through. Remove the tag once you have confirmed the answer.</p>
-            <ul class="question-list" id="stale-list"></ul>
-            <p class="muted text-box" id="stale-empty" hidden>Nothing tagged. Use "Flag out of date" on any question in the bank to collect it here.</p>
-        </section>
-
-        <section class="view" id="view-bank" hidden>
-            <h2>Question bank</h2>
-            <form class="card form" id="add-question-form">
-                <label for="bank-question">Add a question</label>
-                <textarea id="bank-question" rows="3" maxlength="2000" required placeholder="Question"></textarea>
-                <textarea id="bank-answer" rows="2" maxlength="2000" placeholder="Answer"></textarea>
-                <select id="bank-topic" aria-label="Topic" required></select>
-                <input type="text" id="bank-topic-new" maxlength="80" placeholder="Name of the new topic" hidden>
-                <button type="submit" class="primary">Add to bank</button>
-            </form>
-
-            <form class="card form" id="import-form">
-                <label for="import-format">Import your question list</label>
-                <select id="import-format">
-                    <option value="csv">CSV - question, answer, topic</option>
-                    <option value="json">JSON - list of questions</option>
-                </select>
-                <textarea id="import-content" rows="6" placeholder="question,answer,topic&#10;What is the RAF motto?,Per Ardua ad Astra,Motto"></textarea>
-                <button type="submit" class="primary">Import</button>
-            </form>
-
-            <div class="bank-filters">
-                <input type="search" id="bank-search" placeholder="Search questions..." aria-label="Search questions">
+            <div class="card form prompt-panel" hidden>
+                <label for="prompt-preview-checks">AI prompt</label>
+                <p class="hint">The complete report and flagged-question CSV, with instructions, is included.</p>
+                <textarea class="prompt-preview" id="prompt-preview-checks" rows="12" readonly></textarea>
+                <button type="button" class="primary copy-prompt-btn">Copy prompt</button>
             </div>
-            <div id="bank-list"></div>
+        </section>
+
+        <section class="view" id="view-human-review" hidden>
+            <h2>Human review</h2>
+            <p class="hint text-box">Questions here were left unchanged because an AI could not verify a safe answer, or an admin sent an AI suggestion here for manual editing. Review them yourself, edit the question if needed, then clear the flag.</p>
+            <div class="card form">
+                <ul class="question-list" id="needs-review-list"></ul>
+                <p class="muted text-box" id="needs-review-empty" hidden>No questions are waiting for human review.</p>
+            </div>
+        </section>
+
+        <section class="view" id="view-ai-review" hidden>
+            <h2>AI changes to approve</h2>
+            <p class="hint text-box">Accept a verified suggestion with or without a future-update tag, reject it while keeping the current question, or forward it to manual review.</p>
+            <ul class="question-list" id="ai-review-list"></ul>
+            <p class="muted text-box" id="ai-review-empty" hidden>No AI changes are waiting for approval.</p>
+        </section>
+
+        <section class="view admin-only" id="view-board" hidden>
+            <header class="page-heading board-page-heading" id="board-page-heading">
+                <div class="board-heading-intro">
+                    <div class="board-heading-title">
+                        <p class="eyebrow">Administration · all questions</p>
+                        <h2>Question board</h2>
+                    </div>
+                    <p class="board-heading-subtitle">All questions, submissions, reports and updates. Drag cards between columns to organise them, into the editor to edit, or to the browser tab bar to search Google where supported.</p>
+                    <p class="board-heading-subtitle-mobile">Swipe between status pages, then tap a card to see its actions.</p>
+                </div>
+                <div class="board-heading-tools">
+                    <label class="board-topic-filter" for="board-topic">Topic
+                        <select id="board-topic"><option value="">All topics</option></select>
+                    </label>
+                </div>
+            </header>
+            <details class="board-tools">
+                <summary>Manage questions · add, rename topics, or clear the bank</summary>
+                <div class="board-tools-grid">
+                    <form class="card form" id="add-question-form">
+                        <label for="bank-question">Add a question</label>
+                        <textarea id="bank-question" rows="3" maxlength="2000" required placeholder="Question"></textarea>
+                        <label for="bank-answer">Answer</label>
+                        <textarea id="bank-answer" rows="2" maxlength="2000" placeholder="Answer"></textarea>
+                        <label for="bank-topic">Topic</label>
+                        <select id="bank-topic" aria-label="Topic" required></select>
+                        <input type="text" id="bank-topic-new" maxlength="80" placeholder="Name of the new topic" hidden>
+                        <button type="submit" class="primary">Add to board</button>
+                    </form>
+                    <div class="card form">
+                        <h3 class="mobile-board-tools-heading">Topic and question bank</h3>
+                        <label for="board-rename-topic">Rename a topic</label>
+                        <select id="board-rename-topic"><option value="">Choose a topic</option></select>
+                        <button type="button" id="board-rename-topic-btn">Rename topic</button>
+                        <div class="danger-zone">
+                            <h3 class="section-label">Clear the question bank</h3>
+                            <p class="hint text-box warning-text">Permanently removes every question and its linked reports and answer history. This cannot be undone.</p>
+                            <button type="button" class="no" id="delete-all-questions-btn">Delete all questions</button>
+                        </div>
+                    </div>
+                </div>
+            </details>
+            <p class="board-swipe-hint">Swipe horizontally to change question status</p>
+            <div class="question-board-scroll" role="region" tabindex="0" aria-label="Question state pages; scroll horizontally to change status">
+                <div class="question-board" id="question-board">
+                    <section class="question-board-column" data-board-state="active"><header><span class="board-state-dot active"></span><h3>Active</h3><span class="board-column-count" data-count="active">0</span><button type="button" class="board-column-add" aria-label="Add a question">Add question</button></header><div class="board-column-cards" id="board-active"></div></section>
+                    <section class="question-board-column" data-board-state="time-sensitive"><header><span class="board-state-dot time-sensitive"></span><h3>Active · time sensitive</h3><span class="board-column-count" data-count="time-sensitive">0</span><button type="button" class="board-column-add" aria-label="Add a question">Add question</button></header><div class="board-column-cards" id="board-time-sensitive"></div></section>
+                    <section class="question-board-column" data-board-state="reported"><header><span class="board-state-dot reported"></span><h3>Reported</h3><span class="board-column-count" data-count="reported">0</span><button type="button" class="board-column-add" aria-label="Add a question">Add question</button></header><div class="board-column-cards" id="board-reported"></div></section>
+                    <section class="question-board-column" data-board-state="approval"><header><span class="board-state-dot approval"></span><h3>Approval</h3><span class="board-column-count" data-count="approval">0</span><button type="button" class="board-column-add" aria-label="Add a question">Add question</button></header><div class="board-column-cards" id="board-approval"></div></section>
+                    <section class="question-board-column" data-board-state="archive"><header><span class="board-state-dot archive"></span><h3>Archive</h3><span class="board-column-count" data-count="archive">0</span><button type="button" class="board-column-add" aria-label="Add a question">Add question</button></header><div class="board-column-cards" id="board-archive"></div></section>
+                    <section class="question-board-column delete-drop-column" data-board-action="delete" aria-label="Delete questions"><header><span class="board-state-dot"></span><h3>Delete</h3></header><div class="board-delete-drop-message">Drop a question here to delete it</div></section>
+                </div>
+            </div>
+            <section class="board-editor-dock" id="board-editor-dock" aria-label="Question editor">
+                <div class="board-editor-home">
+                    <button type="button" class="primary board-editor-add" id="board-new-question" aria-label="Add a new question">+</button>
+                    <button type="button" class="board-editor-import" id="board-import-open">Import CSV</button>
+                    <div class="board-editor-drop" id="board-editor-drop">Drag a question here to edit</div>
+                </div>
+                <div class="board-editor-content" id="board-editor-content" hidden>
+                    <div class="board-editor-card-slot" id="board-editor-card-slot"></div>
+                </div>
+            </section>
+            <dialog class="modal" id="board-import-dialog" aria-labelledby="board-import-title">
+                <form class="modal-form" id="import-form">
+                    <h3 id="board-import-title">Import questions from CSV</h3>
+                    <p class="hint">Choose a CSV file or paste its contents below. Include question, answer, and topic columns.</p>
+                    <label for="import-file">CSV file</label>
+                    <input type="file" id="import-file" accept=".csv,text/csv">
+                    <label for="import-content">CSV contents</label>
+                    <textarea id="import-content" rows="8" placeholder="question,answer,topic&#10;What is the RAF motto?,Per Ardua ad Astra,Motto"></textarea>
+                    <div class="modal-actions">
+                        <button type="button" class="ghost" id="board-import-cancel">Cancel</button>
+                        <button type="submit" class="primary">Import to board</button>
+                    </div>
+                </form>
+            </dialog>
         </section>
 
         <section class="view" id="view-users" hidden>
@@ -318,6 +431,31 @@
                 <button type="submit" class="primary">Create account</button>
             </form>
             <ul class="question-list" id="user-list"></ul>
+        </section>
+
+        <section class="view" id="view-report-issue" hidden>
+            <h2>Report a website issue</h2>
+            <p class="hint text-box">Tell the admin team what went wrong or what could work better.</p>
+            <form class="card form" id="website-issue-form">
+                <label for="website-issue-name">Your name (optional)</label>
+                <input type="text" id="website-issue-name" maxlength="80" autocomplete="name">
+                <label for="website-issue-title">Short title</label>
+                <input type="text" id="website-issue-title" maxlength="120" required>
+                <label for="website-issue-details">What happened?</label>
+                <textarea id="website-issue-details" rows="6" maxlength="3000" required></textarea>
+                <button type="submit" class="primary">Send report</button>
+            </form>
+        </section>
+
+        <section class="view admin-only" id="view-website-issues" hidden>
+            <h2>Website issue reports</h2>
+            <p class="hint text-box">Reports submitted from the menu. Mark an issue fixed or dismiss it after review.</p>
+            <div class="controls">
+                <button type="button" id="website-issues-pending" class="secondary">Open reports</button>
+                <button type="button" id="website-issues-resolved" class="secondary">Handled reports</button>
+            </div>
+            <ul class="question-list" id="website-issues-list"></ul>
+            <p class="muted text-box" id="website-issues-empty" hidden>No website issue reports here.</p>
         </section>
 
         <section class="view" id="view-password" hidden>

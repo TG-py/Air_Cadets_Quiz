@@ -1,4 +1,5 @@
 import os
+import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -6,6 +7,8 @@ from datetime import datetime, timezone
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("QUIZ_DB", os.path.join(BASE_DIR, "questions.db"))
+SCHEMA_VERSION = 2
+LOGGER = logging.getLogger("air_cadets_quiz.db")
 
 USER_STAFF = "staff"
 USER_ADMIN = "admin"
@@ -44,6 +47,8 @@ CREATE TABLE IF NOT EXISTS questions (
     topic         TEXT NOT NULL DEFAULT 'General',
     status        TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('pending', 'approved', 'rejected')),
+    board_state   TEXT NOT NULL DEFAULT 'approval'
+                  CHECK (board_state IN ('active', 'time-sensitive', 'reported', 'approval', 'archive')),
     submitted_by  TEXT NOT NULL DEFAULT '',
     source        TEXT NOT NULL DEFAULT 'staff',
     review_note   TEXT NOT NULL DEFAULT '',
@@ -51,6 +56,12 @@ CREATE TABLE IF NOT EXISTS questions (
     reviewed_at   TEXT,
     archived_at   TEXT,
     outdated      INTEGER NOT NULL DEFAULT 0,
+    needs_review  INTEGER NOT NULL DEFAULT 0,
+    ai_pending    INTEGER NOT NULL DEFAULT 0,
+    ai_question_text TEXT NOT NULL DEFAULT '',
+    ai_answer_text TEXT NOT NULL DEFAULT '',
+    ai_topic      TEXT NOT NULL DEFAULT '',
+    ai_reason     TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS questions_status ON questions(status);
@@ -194,11 +205,10 @@ def drop_readable_passwords(conn):
     if "password_text" not in {row["name"] for row in conn.execute("PRAGMA table_info(users)")}:
         return
     conn.execute("UPDATE users SET password_text = ''")
-    try:
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        LOGGER.warning("migration_legacy_column_retained column=users.password_text reason=sqlite_drop_column_unsupported")
+    else:
         conn.execute("ALTER TABLE users DROP COLUMN password_text")
-    except sqlite3.Error:
-        # older sqlite cannot drop a column; it stays, empty and unread
-        pass
 
 
 def ensure_quiz_session_schema(conn):
@@ -230,26 +240,20 @@ def ensure_quiz_session_schema(conn):
         ("topic", "TEXT NOT NULL DEFAULT ''"),
     ):
         if column not in existing:
-            try:
-                conn.execute(f"ALTER TABLE attempts ADD COLUMN {column} {ddl}")
-            except sqlite3.Error:
-                pass
+            conn.execute(f"ALTER TABLE attempts ADD COLUMN {column} {ddl}")
     conn.execute("CREATE INDEX IF NOT EXISTS attempts_quiz_session ON attempts(quiz_session_id)")
     # attempts recorded before snapshots existed keep only the question id, so
     # copy the current bank text across where the question still exists
-    try:
-        conn.execute(
-            "UPDATE attempts SET question_text = "
-            "(SELECT question_text FROM questions WHERE questions.id = attempts.question_id), "
-            "answer_text = "
-            "(SELECT answer_text FROM questions WHERE questions.id = attempts.question_id), "
-            "topic = "
-            "(SELECT topic FROM questions WHERE questions.id = attempts.question_id) "
-            "WHERE (question_text IS NULL OR question_text = '') "
-            "AND EXISTS (SELECT 1 FROM questions WHERE questions.id = attempts.question_id)"
-        )
-    except sqlite3.Error:
-        pass
+    conn.execute(
+        "UPDATE attempts SET question_text = "
+        "(SELECT question_text FROM questions WHERE questions.id = attempts.question_id), "
+        "answer_text = "
+        "(SELECT answer_text FROM questions WHERE questions.id = attempts.question_id), "
+        "topic = "
+        "(SELECT topic FROM questions WHERE questions.id = attempts.question_id) "
+        "WHERE (question_text IS NULL OR question_text = '') "
+        "AND EXISTS (SELECT 1 FROM questions WHERE questions.id = attempts.question_id)"
+    )
 
 
 def init():
@@ -259,22 +263,71 @@ def init():
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
         conn.executescript(SCHEMA)
-        question_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(questions)")
-        }
-        if "archived_at" not in question_columns:
-            conn.execute("ALTER TABLE questions ADD COLUMN archived_at TEXT")
-        ensure_outdated_schema(conn)
-        ensure_practice_schema(conn)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS questions_archived ON questions(archived_at)"
-        )
-        ensure_reports_schema(conn)
-        drop_readable_passwords(conn)
-        ensure_quiz_session_schema(conn)
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            raise RuntimeError(
+                "database schema version %d is newer than this app supports (%d)"
+                % (version, SCHEMA_VERSION)
+            )
+        while version < SCHEMA_VERSION:
+            next_version = version + 1
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if next_version == 1:
+                    _migrate_legacy_schema(conn)
+                elif next_version == 2:
+                    _migrate_website_issue_reports(conn)
+                else:
+                    raise RuntimeError("no migration defined for schema version %d" % next_version)
+                conn.execute("PRAGMA user_version = %d" % next_version)
+                conn.execute("COMMIT")
+                version = next_version
+            except Exception:
+                conn.execute("ROLLBACK")
+                LOGGER.exception("migration_failed from_version=%s to_version=%s", version, next_version)
+                raise
         conn.execute("PRAGMA wal_autocheckpoint = 512")
     finally:
         conn.close()
+
+
+def _migrate_legacy_schema(conn):
+    """Apply the idempotent upgrades used by databases before schema version 1.
+
+    Future schema changes should add a numbered migration and advance
+    SCHEMA_VERSION. ``PRAGMA user_version`` is only advanced after every step
+    completes successfully, so an interrupted upgrade can be retried safely.
+    """
+    LOGGER.info("migration_started from_version=0 to_version=1")
+    question_columns = {row["name"] for row in conn.execute("PRAGMA table_info(questions)")}
+    if "archived_at" not in question_columns:
+        conn.execute("ALTER TABLE questions ADD COLUMN archived_at TEXT")
+    ensure_outdated_schema(conn)
+    ensure_needs_review_schema(conn)
+    ensure_ai_review_schema(conn)
+    ensure_practice_schema(conn)
+    conn.execute("CREATE INDEX IF NOT EXISTS questions_archived ON questions(archived_at)")
+    ensure_reports_schema(conn)
+    ensure_question_board_state_schema(conn)
+    drop_readable_passwords(conn)
+    ensure_quiz_session_schema(conn)
+    LOGGER.info("migration_completed to_version=1")
+
+
+def _migrate_website_issue_reports(conn):
+    LOGGER.info("migration_started from_version=1 to_version=2")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS website_issue_reports ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "reported_by INTEGER REFERENCES users(id) ON DELETE SET NULL, "
+        "reporter_name TEXT NOT NULL DEFAULT '', "
+        "title TEXT NOT NULL, details TEXT NOT NULL, page TEXT NOT NULL DEFAULT '', "
+        "status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'resolved', 'dismissed')), "
+        "created_at TEXT NOT NULL, resolved_at TEXT, "
+        "resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS website_issue_reports_status ON website_issue_reports(status)")
+    LOGGER.info("migration_completed to_version=2")
 
 
 def ensure_outdated_schema(conn):
@@ -286,26 +339,75 @@ def ensure_outdated_schema(conn):
     """
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(questions)")}
     if "outdated" not in existing:
-        try:
-            conn.execute("ALTER TABLE questions ADD COLUMN outdated INTEGER NOT NULL DEFAULT 0")
-        except sqlite3.Error:
-            pass
+        conn.execute("ALTER TABLE questions ADD COLUMN outdated INTEGER NOT NULL DEFAULT 0")
     if "stale_flag" in existing:
-        try:
-            conn.execute(
-                "UPDATE questions SET outdated = 1 WHERE stale_flag = 1 "
-                "OR (stale_due IS NOT NULL AND stale_due != '')"
-            )
-        except sqlite3.Error:
-            pass
+        condition = "stale_flag = 1"
+        if "stale_due" in existing:
+            condition += " OR (stale_due IS NOT NULL AND stale_due != '')"
+        conn.execute("UPDATE questions SET outdated = 1 WHERE " + condition)
     for column in ("stale_flag", "stale_note", "stale_due", "last_verified_at"):
         if column in existing:
-            try:
+            if sqlite3.sqlite_version_info >= (3, 35, 0):
                 conn.execute(f"ALTER TABLE questions DROP COLUMN {column}")
-            except sqlite3.Error:
-                # older sqlite cannot drop a column; it stays, unused and unread
-                pass
+            else:
+                LOGGER.warning("migration_legacy_column_retained column=questions.%s reason=sqlite_drop_column_unsupported", column)
     conn.execute("CREATE INDEX IF NOT EXISTS questions_outdated ON questions(outdated)")
+
+
+def ensure_needs_review_schema(conn):
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(questions)")}
+    if "needs_review" not in existing:
+        conn.execute("ALTER TABLE questions ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS questions_needs_review ON questions(needs_review)")
+
+
+def set_question_needs_review(conn, question_id, tagged):
+    ensure_needs_review_schema(conn)
+    conn.execute("UPDATE questions SET needs_review = ? WHERE id = ?", (1 if tagged else 0, question_id))
+    sync_question_board_state(conn, question_id)
+
+
+def list_needs_review(conn, limit=5000):
+    ensure_needs_review_schema(conn)
+    return conn.execute(
+        "SELECT * FROM questions WHERE archived_at IS NULL AND needs_review = 1 ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def needs_review_count(conn):
+    ensure_needs_review_schema(conn)
+    row = conn.execute("SELECT COUNT(*) AS n FROM questions WHERE archived_at IS NULL AND needs_review = 1").fetchone()
+    return row["n"] or 0
+
+
+def ensure_ai_review_schema(conn):
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(questions)")}
+    columns = {
+        "ai_pending": "INTEGER NOT NULL DEFAULT 0",
+        "ai_question_text": "TEXT NOT NULL DEFAULT ''",
+        "ai_answer_text": "TEXT NOT NULL DEFAULT ''",
+        "ai_topic": "TEXT NOT NULL DEFAULT ''",
+        "ai_reason": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            conn.execute("ALTER TABLE questions ADD COLUMN %s %s" % (name, definition))
+    conn.execute("CREATE INDEX IF NOT EXISTS questions_ai_pending ON questions(ai_pending)")
+
+
+def list_ai_pending(conn, limit=5000):
+    ensure_ai_review_schema(conn)
+    return conn.execute(
+        "SELECT * FROM questions WHERE archived_at IS NULL AND ai_pending = 1 ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def ai_pending_count(conn):
+    ensure_ai_review_schema(conn)
+    row = conn.execute("SELECT COUNT(*) AS n FROM questions WHERE archived_at IS NULL AND ai_pending = 1").fetchone()
+    return row["n"] or 0
 
 
 REPORT_PENDING = "pending"
@@ -337,6 +439,44 @@ def ensure_reports_schema(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS reports_status ON reports(status)")
 
 
+def ensure_question_board_state_schema(conn):
+    """Persist the board column while preserving existing question placement."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(questions)")}
+    if "board_state" in existing:
+        return
+    conn.execute(
+        "ALTER TABLE questions ADD COLUMN board_state TEXT NOT NULL DEFAULT 'approval' "
+        "CHECK (board_state IN ('active', 'time-sensitive', 'reported', 'approval', 'archive'))"
+    )
+    conn.execute(
+        "UPDATE questions SET board_state = CASE "
+        "WHEN archived_at IS NOT NULL THEN 'archive' "
+        "WHEN EXISTS (SELECT 1 FROM reports WHERE reports.question_id = questions.id AND reports.status = 'pending') THEN 'reported' "
+        "WHEN status != 'approved' OR ai_pending = 1 OR needs_review = 1 THEN 'approval' "
+        "WHEN outdated = 1 THEN 'time-sensitive' ELSE 'active' END"
+    )
+
+
+def sync_question_board_state(conn, question_id):
+    """Keep the saved board column aligned with lifecycle events and flags."""
+    question = conn.execute("SELECT * FROM questions WHERE id = ?", (question_id,)).fetchone()
+    if not question:
+        return
+    if question["archived_at"]:
+        state = "archive"
+    elif conn.execute(
+        "SELECT 1 FROM reports WHERE question_id = ? AND status = 'pending' LIMIT 1", (question_id,)
+    ).fetchone():
+        state = "reported"
+    elif question["status"] != Q_APPROVED or question["ai_pending"] or question["needs_review"]:
+        state = "approval"
+    elif question["outdated"]:
+        state = "time-sensitive"
+    else:
+        state = "active"
+    conn.execute("UPDATE questions SET board_state = ? WHERE id = ?", (state, question_id))
+
+
 def add_report(conn, question_id, user_id, reporter_name, reason):
     ensure_reports_schema(conn)
     cur = conn.execute(
@@ -344,6 +484,7 @@ def add_report(conn, question_id, user_id, reporter_name, reason):
         "VALUES (?, ?, ?, ?, ?, ?)",
         (question_id, user_id, reporter_name or "", reason, REPORT_PENDING, now()),
     )
+    conn.execute("UPDATE questions SET board_state = 'reported' WHERE id = ?", (question_id,))
     return cur.lastrowid
 
 
@@ -414,6 +555,47 @@ def resolve_report(conn, report_id, status, resolver_id):
         "UPDATE reports SET status = ?, resolved_at = ?, resolved_by = ? "
         "WHERE id = ? AND status = ?",
         (status, now(), resolver_id, report_id, REPORT_PENDING),
+    )
+    if cur.rowcount:
+        report = conn.execute("SELECT question_id FROM reports WHERE id = ?", (report_id,)).fetchone()
+        if report:
+            sync_question_board_state(conn, report["question_id"])
+    return cur.rowcount
+
+
+def add_website_issue(conn, reported_by, reporter_name, title, details, page):
+    cur = conn.execute(
+        "INSERT INTO website_issue_reports "
+        "(reported_by, reporter_name, title, details, page, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+        (reported_by, reporter_name or "", title, details, page or "", now()),
+    )
+    return cur.lastrowid
+
+
+def list_website_issues(conn, status="pending", limit=500):
+    if status == "all":
+        return conn.execute(
+            "SELECT * FROM website_issue_reports "
+            "ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    if status == "resolved":
+        return conn.execute(
+            "SELECT * FROM website_issue_reports WHERE status IN ('resolved', 'dismissed') "
+            "ORDER BY id DESC LIMIT ?", (limit,),
+        ).fetchall()
+    return conn.execute(
+        "SELECT * FROM website_issue_reports WHERE status = 'pending' ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def resolve_website_issue(conn, issue_id, status, resolver_id):
+    cur = conn.execute(
+        "UPDATE website_issue_reports SET status = ?, resolved_at = ?, resolved_by = ? "
+        "WHERE id = ? AND status = 'pending'",
+        (status, now(), resolver_id, issue_id),
     )
     return cur.rowcount
 
@@ -487,9 +669,9 @@ def reset_progress(conn):
 
 def add_question(conn, question_text, answer_text, topic, status, submitted_by="", source="staff"):
     cur = conn.execute(
-        "INSERT INTO questions (question_text, answer_text, topic, status, submitted_by, source, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (question_text, answer_text, topic, status, submitted_by, source, now()),
+        "INSERT INTO questions (question_text, answer_text, topic, status, board_state, submitted_by, source, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (question_text, answer_text, topic, status, "active" if status == Q_APPROVED else "approval", submitted_by, source, now()),
     )
     return cur.lastrowid
 
@@ -529,9 +711,11 @@ def list_pending(conn, limit=500):
 
 def review_question(conn, question_id, status, reviewer_id, note=""):
     conn.execute(
-        "UPDATE questions SET status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ?",
+        "UPDATE questions SET status = ?, "
+        "reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ?",
         (status, reviewer_id, now(), note or "", question_id),
     )
+    sync_question_board_state(conn, question_id)
 
 
 def delete_question(conn, question_id):
@@ -540,7 +724,7 @@ def delete_question(conn, question_id):
 
 def archive_question(conn, question_id):
     cur = conn.execute(
-        "UPDATE questions SET archived_at = ? "
+        "UPDATE questions SET archived_at = ?, board_state = 'archive' "
         "WHERE id = ? AND status = ? AND archived_at IS NULL",
         (now(), question_id, Q_APPROVED),
     )
@@ -549,10 +733,13 @@ def archive_question(conn, question_id):
 
 def restore_question(conn, question_id):
     cur = conn.execute(
-        "UPDATE questions SET archived_at = NULL "
+        "UPDATE questions SET archived_at = NULL, board_state = CASE WHEN outdated = 1 "
+        "THEN 'time-sensitive' ELSE 'active' END "
         "WHERE id = ? AND status = ? AND archived_at IS NOT NULL",
         (question_id, Q_APPROVED),
     )
+    if cur.rowcount:
+        sync_question_board_state(conn, question_id)
     return cur.rowcount
 
 
@@ -560,16 +747,17 @@ def set_question_outdated(conn, question_id, tagged):
     """Give or remove a question's out-of-date tag."""
     ensure_outdated_schema(conn)
     conn.execute(
-        "UPDATE questions SET outdated = ? WHERE id = ?",
-        (1 if tagged else 0, question_id),
+        "UPDATE questions SET outdated = ?, board_state = CASE "
+        "WHEN board_state IN ('active', 'time-sensitive') THEN ? ELSE board_state END WHERE id = ?",
+        (1 if tagged else 0, "time-sensitive" if tagged else "active", question_id),
     )
 
 
-def list_stale(conn, limit=500):
+def list_stale(conn, limit=5000):
     """Every tagged question, newest first."""
     ensure_outdated_schema(conn)
     return conn.execute(
-        "SELECT * FROM questions WHERE archived_at IS NULL AND outdated = 1 "
+        "SELECT * FROM questions WHERE archived_at IS NULL AND outdated = 1 AND ai_pending = 0 "
         "ORDER BY id DESC LIMIT ?",
         (limit,),
     ).fetchall()
@@ -578,7 +766,7 @@ def list_stale(conn, limit=500):
 def stale_count(conn):
     ensure_outdated_schema(conn)
     row = conn.execute(
-        "SELECT COUNT(*) AS n FROM questions WHERE archived_at IS NULL AND outdated = 1"
+        "SELECT COUNT(*) AS n FROM questions WHERE archived_at IS NULL AND outdated = 1 AND ai_pending = 0"
     ).fetchone()
     return row["n"] or 0
 

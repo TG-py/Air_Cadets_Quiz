@@ -52,6 +52,11 @@ optional - a bare flag is enough. Reports land on the admin *Reports* page,
 newest first, where each one can be marked fixed or dismissed
 after checking the bank.
 
+The three-dots button beside the menu title opens a website issue form. Anyone
+can send a short title and description; the current page and signed-in identity
+are attached when available. Admins review these in **Website issue reports**
+and can mark each one fixed or dismiss it.
+
 ## Running it
 
 ```bash
@@ -209,6 +214,72 @@ The database lives in a named volume (`quiz-data`) mounted at `/srv/data`, so
 questions and accounts survive a rebuild or an image upgrade. `.env` is not
 copied into the image.
 
+### Production hosting
+
+The app serves plain HTTP and is intended to sit behind a reverse proxy that
+handles HTTPS. Do not expose port 8001 directly to the public internet. Restrict
+it to the proxy host with a firewall or bind the Compose port to loopback
+(`127.0.0.1:8001:8001`) when the proxy runs on the same machine. Set
+`QUIZ_SECURE_COOKIES=1` in the app environment after HTTPS is enabled.
+
+For example, an Nginx virtual host can forward requests to a loopback-bound
+Compose service:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name quiz.example.org;
+
+    # Configure certificate and key paths for your host here.
+    ssl_certificate     /etc/letsencrypt/live/quiz.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/quiz.example.org/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 30s;
+    }
+}
+```
+
+Keep the database volume on persistent storage and include it in regular
+backups. Stop the container before copying a raw database file. For a live
+SQLite backup, use Python's online backup API inside the container:
+
+```bash
+docker compose exec -T air-cadets-quiz python -c \
+  "import sqlite3; src=sqlite3.connect('/srv/data/questions.db'); dst=sqlite3.connect('/tmp/questions-backup.db'); src.backup(dst); dst.close(); src.close()"
+docker compose cp air-cadets-quiz:/tmp/questions-backup.db ./questions-backup.db
+```
+
+To restore, stop the app, copy the backup into `/srv/data/questions.db`, then
+start the app again:
+
+```bash
+docker compose stop air-cadets-quiz
+docker compose cp ./questions-backup.db air-cadets-quiz:/srv/data/questions.db
+docker compose start air-cadets-quiz
+```
+
+Keep backups outside the container and periodically confirm that a backup can
+be opened before relying on it.
+
+On startup, the app reads SQLite's schema version and applies any pending
+upgrade before serving requests. The version advances only after the migration
+finishes; a failed migration is logged and stops startup so the database is not
+served in a partially upgraded state. Keep a backup before upgrading the app.
+
+The server's `/healthz` endpoint checks both HTTP handling and database access.
+Docker uses it for the container health status. Startup failures, request
+errors, and health-check failures are written to container logs; set `QUIZ_LOG=1`
+to include successful request lines as well. When the app is behind a proxy,
+login throttling sees the proxy connection address unless the deployment gives
+each client a direct connection; the app does not trust forwarded addresses
+for security decisions.
+
 To import your list into a running container:
 
 ```bash
@@ -246,12 +317,20 @@ docker logs air-cadets-quiz
 
 | File | Purpose |
 | --- | --- |
-| `app.py` | HTTP server, routing, permissions, static files |
+| `app.py` | Startup and initial admin account |
+| `api.py` | API route table |
+| `api_common.py` | Shared API errors, request context, validation |
+| `api_auth.py` | Login, session, and squadron quiz endpoints |
+| `api_questions.py` | Question bank, submissions, review, and imports |
+| `api_practice.py` | Solo practice endpoints |
+| `api_issues.py` | Website issue submission and admin review endpoints |
+| `api_admin.py` | Admin reports, progress, users, and session endpoints |
+| `webserver.py` | HTTP server, static files, response headers, health checks |
 | `db.py` | Schema, connection pooling, all SQL |
 | `auth.py` | Password hashing, sessions, CSRF, login rate limiting |
 | `quiz.py` | Weighting and random question selection |
 | `import_questions.py` | Command line importer |
-| `test_quiz.py` | End to end test suite |
+| `test_quiz.py`, `tests/` | End-to-end test runner and cases grouped by feature |
 | `static/` | Page, styles and browser code |
 | `questions.db` | Created on first run |
 
@@ -261,10 +340,10 @@ docker logs air-cadets-quiz
 python3 test_quiz.py
 ```
 
-Starts the server on a temporary database, runs 92 checks covering roles and
-permissions, the approval flow, imports, the weighting maths, skipping and
-session security, then shuts down. It uses port 8099 and its own database, so
-it will not touch your real one.
+Starts the server on a temporary database, runs the end-to-end cases grouped
+into authentication, account, question, quiz/progress, interface, and database
+migration files under `tests/`, then shuts down. It uses port 8099 and its own
+database, so it will not touch your real one.
 
 ## Security notes
 

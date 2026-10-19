@@ -2,7 +2,7 @@ FROM python:3.12-alpine
 
 WORKDIR /srv
 
-COPY app.py db.py auth.py quiz.py import_questions.py ./
+COPY app.py api.py api_common.py api_auth.py api_questions.py api_practice.py api_issues.py api_admin.py webserver.py db.py auth.py quiz.py import_questions.py ./
 COPY static ./static
 
 RUN adduser -D -H -u 1000 appuser \
