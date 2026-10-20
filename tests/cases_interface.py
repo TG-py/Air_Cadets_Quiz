@@ -473,4 +473,43 @@ check("the editor drop box returns while the move is saved",
       and "function restoreBoardEditorAfterDrop()" in app_js,
       "the edit box would stay hidden after the drag")
     ''',
+    46: r'''
+print("\n[46] rejected posts keep a kept-alive connection usable")
+# Logging out fires a keepalive finish request after the cookie has gone, so
+# the server rejects it before parsing the body. Any unread bytes would then be
+# read as the next request line and the reload would fail to reach the server.
+import socket
+host, port = BASE.split("//", 1)[1].split(":")
+host = host or "127.0.0.1"
+sock = socket.create_connection((host, int(port)), timeout=5)
+sock.sendall(
+    b"POST /api/quiz/finish HTTP/1.1\r\n"
+    b"Host: " + host.encode() + b"\r\n"
+    b"Content-Type: application/json\r\n"
+    b"Content-Length: 2\r\n"
+    b"Connection: keep-alive\r\n\r\n"
+    b"{}"
+    b"GET /healthz HTTP/1.1\r\n"
+    b"Host: " + host.encode() + b"\r\n"
+    b"Connection: close\r\n\r\n"
+)
+sock.settimeout(3)
+raw = b""
+try:
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        raw += chunk
+except socket.timeout:
+    pass
+finally:
+    sock.close()
+reply = raw.decode(errors="replace")
+check("a rejected post is still answered",
+      "401 Unauthorized" in reply, reply[:200])
+check("the next request on a kept-alive connection is understood",
+      "200 OK" in reply and "501" not in reply and "Unsupported method" not in reply,
+      reply[:300])
+    ''',
 }

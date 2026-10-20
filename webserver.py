@@ -115,16 +115,21 @@ class QuizHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def read_body(self):
+        # Once this runs the body is either read or the connection is closed,
+        # so consume_body leaves it alone from here on.
+        self._body_read = True
         length = self.headers.get("Content-Length")
         if not length:
             return {}
         try:
             size = int(length)
         except ValueError:
+            self.close_connection = True
             raise bad_request("invalid content length")
         if size <= 0:
             return {}
         if size > MAX_BODY_BYTES:
+            self.close_connection = True
             raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "request body is too large")
         raw = self.rfile.read(size)
         if not raw.strip():
@@ -133,6 +138,31 @@ class QuizHandler(BaseHTTPRequestHandler):
             return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise bad_request("request body must be valid json")
+
+    def consume_body(self):
+        """Drain any request body a handler did not read.
+
+        Responses such as 401/403/404/405 are sent before the body is parsed,
+        so on a kept-alive connection the unread bytes would be mistaken for
+        the next request line. Read them here to keep the socket in sync.
+        """
+        if self._body_read:
+            return
+        self._body_read = True
+        length = self.headers.get("Content-Length")
+        try:
+            remaining = int(length) if length else 0
+        except ValueError:
+            self.close_connection = True
+            return
+        if remaining > MAX_BODY_BYTES:
+            self.close_connection = True
+            return
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 65536))
+            if not chunk:
+                break
+            remaining -= len(chunk)
 
     def handle_api(self, method, path, query, conn):
         cookie = None
@@ -207,17 +237,22 @@ class QuizHandler(BaseHTTPRequestHandler):
             return self.send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal server error"}
             )
+        finally:
+            self.consume_body()
 
     def do_GET(self):
         self._pending_cookie = None
+        self._body_read = False
         self.dispatch("GET")
 
     def do_POST(self):
         self._pending_cookie = None
+        self._body_read = False
         self.dispatch("POST")
 
     def do_HEAD(self):
         self._pending_cookie = None
+        self._body_read = False
         self.dispatch("GET")
 
     def log_message(self, fmt, *args):
