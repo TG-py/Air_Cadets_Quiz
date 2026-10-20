@@ -1,4 +1,5 @@
 """practice API handlers."""
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 
 import db
@@ -23,8 +24,8 @@ def api_practice_start(ctx):
 
 
 def api_practice_next(ctx):
-    """Next practice question: same active bank as the squadron quiz, minus
-    the ones already faced in this run. Open to everyone."""
+    """Next practice question: the same squadron-weighted pool as the quiz,
+    minus the ones already faced in this run. Open to everyone."""
     try:
         session_id = int((ctx.q("practice_session_id") or "").strip())
     except (TypeError, ValueError):
@@ -127,4 +128,76 @@ def api_delete_practice_session(ctx):
     db.delete_practice_session(ctx.conn, session_id)
     return {"ok": True, "message": "that practice session has been deleted"}
 
+def api_practice_stats(ctx):
+    """Overall practice totals grouped by topic and question, kept apart from
+    the squadron scoreboard."""
+    questions = db.practice_question_stats(ctx.conn)
+    for question in questions:
+        question["accuracy"] = (
+            round(question["correct"] / question["asked"] * 100, 1)
+            if question["asked"]
+            else None
+        )
+    questions.sort(key=lambda q: (q["topic"].casefold(), q["question_text"].casefold()))
+
+    by_topic = {}
+    for question in questions:
+        by_topic.setdefault(question["topic"], []).append(question)
+
+    topics = []
+    for name, items in by_topic.items():
+        asked = sum(item["asked"] for item in items)
+        correct = sum(item["correct"] for item in items)
+        topics.append(
+            {
+                "topic": name,
+                "question_count": len(items),
+                "asked": asked,
+                "correct": correct,
+                "incorrect": asked - correct,
+                "skipped": sum(item["skipped"] for item in items),
+                "accuracy": round(correct / asked * 100, 1) if asked else None,
+            }
+        )
+    topics.sort(key=lambda t: (t["accuracy"] is None, t["accuracy"] if t["accuracy"] is not None else 0))
+
+    return {
+        "overall": db.practice_overall_stats(ctx.conn),
+        "topics": topics,
+        "questions": questions,
+    }
+
+
+def api_practice_trends(ctx):
+    """Return the last 12 complete/current weeks of solo practice answers."""
+    db.ensure_practice_schema(ctx.conn)
+    today = datetime.now(timezone.utc).date()
+    this_monday = today - timedelta(days=today.weekday())
+    first_monday = this_monday - timedelta(weeks=11)
+    rows = ctx.conn.execute(
+        "SELECT date(created_at, '-' || ((CAST(strftime('%w', created_at) AS INTEGER) + 6) % 7) || ' days') AS week_start, "
+        "SUM(CASE WHEN skipped = 0 AND correct = 1 THEN 1 ELSE 0 END) AS correct, "
+        "SUM(CASE WHEN skipped = 0 AND correct = 0 THEN 1 ELSE 0 END) AS incorrect, "
+        "SUM(CASE WHEN skipped = 1 THEN 1 ELSE 0 END) AS skipped "
+        "FROM practice_attempts WHERE created_at >= ? GROUP BY week_start ORDER BY week_start",
+        (first_monday.isoformat(),),
+    ).fetchall()
+    by_week = {row["week_start"]: row for row in rows}
+    weeks = []
+    for offset in range(12):
+        week_start = first_monday + timedelta(weeks=offset)
+        row = by_week.get(week_start.isoformat())
+        correct = row["correct"] if row else 0
+        incorrect = row["incorrect"] if row else 0
+        skipped = row["skipped"] if row else 0
+        scored = correct + incorrect
+        weeks.append({
+            "week_start": week_start.isoformat(),
+            "correct": correct,
+            "incorrect": incorrect,
+            "skipped": skipped,
+            "scored": scored,
+            "accuracy": round(correct / scored * 100, 1) if scored else None,
+        })
+    return {"weeks": weeks, "minimum_sample": 5}
 

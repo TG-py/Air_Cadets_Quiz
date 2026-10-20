@@ -97,7 +97,9 @@ check("the reset button is admin only",
       "no admin-only reset control on the progress page")
 check("progress reset warns before deleting",
       "cannot be undone" in app_js and "are kept" in app_js, "no destructive warning")
-check("progress reset asks twice", app_js.count("window.confirm(") >= 3, "expected a double confirm")
+reset_js = app_js.split("async function resetProgress(")[1].split("\nasync function ")[0]
+check("progress reset asks twice", reset_js.count("await confirmAction({") >= 2,
+      "expected a double in-page confirm")
 
 before = admin.get("/api/stats")[1]["overall"]
 check("there is progress to delete", before["asked"] + before["skipped"] > 0, str(before))

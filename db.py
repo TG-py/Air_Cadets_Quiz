@@ -563,40 +563,26 @@ def resolve_report(conn, report_id, status, resolver_id):
     return cur.rowcount
 
 
-def add_website_issue(conn, reported_by, reporter_name, title, details, page):
+def add_website_issue(conn, reported_by, title, details, page):
     cur = conn.execute(
         "INSERT INTO website_issue_reports "
         "(reported_by, reporter_name, title, details, page, status, created_at) "
-        "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
-        (reported_by, reporter_name or "", title, details, page or "", now()),
+        "VALUES (?, '', ?, ?, ?, 'pending', ?)",
+        (reported_by, title, details, page or "", now()),
     )
     return cur.lastrowid
 
 
-def list_website_issues(conn, status="pending", limit=500):
-    if status == "all":
-        return conn.execute(
-            "SELECT * FROM website_issue_reports "
-            "ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    if status == "resolved":
-        return conn.execute(
-            "SELECT * FROM website_issue_reports WHERE status IN ('resolved', 'dismissed') "
-            "ORDER BY id DESC LIMIT ?", (limit,),
-        ).fetchall()
+def list_website_issues(conn, limit=500):
     return conn.execute(
-        "SELECT * FROM website_issue_reports WHERE status = 'pending' ORDER BY id DESC LIMIT ?",
+        "SELECT id, reported_by, title, details, page, created_at "
+        "FROM website_issue_reports ORDER BY id DESC LIMIT ?",
         (limit,),
     ).fetchall()
 
 
-def resolve_website_issue(conn, issue_id, status, resolver_id):
-    cur = conn.execute(
-        "UPDATE website_issue_reports SET status = ?, resolved_at = ?, resolved_by = ? "
-        "WHERE id = ? AND status = 'pending'",
-        (status, now(), resolver_id, issue_id),
-    )
+def delete_website_issue(conn, issue_id):
+    cur = conn.execute("DELETE FROM website_issue_reports WHERE id = ?", (issue_id,))
     return cur.rowcount
 
 
@@ -1176,7 +1162,7 @@ def list_practice_sessions(conn, completed_only=True):
     sql = "SELECT * FROM practice_sessions"
     if completed_only:
         sql += " WHERE ended_at IS NOT NULL"
-    sql += " ORDER BY COALESCE(ended_at, started_at) DESC, id DESC"
+    sql += " ORDER BY name COLLATE NOCASE ASC, COALESCE(ended_at, started_at) DESC, id DESC"
     return [practice_session_json(conn, row) for row in conn.execute(sql).fetchall()]
 
 
@@ -1292,3 +1278,58 @@ def question_stats(conn):
         }
         for r in rows
     }
+
+
+def practice_overall_stats(conn):
+    """Practice answer totals, kept apart from the squadron scoreboard."""
+    ensure_practice_schema(conn)
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "COALESCE(SUM(CASE WHEN skipped = 0 THEN 1 ELSE 0 END), 0) AS asked, "
+        "COALESCE(SUM(CASE WHEN skipped = 0 AND correct = 1 THEN 1 ELSE 0 END), 0) AS correct, "
+        "COALESCE(SUM(CASE WHEN skipped = 1 THEN 1 ELSE 0 END), 0) AS skipped "
+        "FROM practice_attempts"
+    ).fetchone()
+    asked = row["asked"] or 0
+    correct = row["correct"] or 0
+    return {
+        "asked": asked,
+        "correct": correct,
+        "incorrect": asked - correct,
+        "skipped": row["skipped"] or 0,
+        "accuracy": round(correct / asked * 100, 1) if asked else 0.0,
+    }
+
+
+def practice_question_stats(conn):
+    """Practice answer history per question, using the live question text and
+    topic while falling back to the snapshot kept with older attempts."""
+    ensure_practice_schema(conn)
+    rows = conn.execute(
+        "SELECT a.question_id AS id, "
+        "COALESCE(q.question_text, MAX(a.question_text), '') AS question_text, "
+        "COALESCE(q.answer_text, MAX(a.answer_text), '') AS answer_text, "
+        "COALESCE(q.topic, MAX(a.topic), '') AS topic, "
+        "SUM(CASE WHEN a.skipped = 0 THEN 1 ELSE 0 END) AS asked, "
+        "SUM(CASE WHEN a.skipped = 0 AND a.correct = 1 THEN 1 ELSE 0 END) AS correct, "
+        "SUM(CASE WHEN a.skipped = 1 THEN 1 ELSE 0 END) AS skipped "
+        "FROM practice_attempts a LEFT JOIN questions q ON q.id = a.question_id "
+        "GROUP BY a.question_id"
+    ).fetchall()
+    out = []
+    for row in rows:
+        asked = row["asked"] or 0
+        correct = row["correct"] or 0
+        out.append(
+            {
+                "id": row["id"],
+                "question_text": row["question_text"] or "",
+                "answer_text": row["answer_text"] or "",
+                "topic": row["topic"] or "",
+                "asked": asked,
+                "correct": correct,
+                "incorrect": asked - correct,
+                "skipped": row["skipped"] or 0,
+            }
+        )
+    return out

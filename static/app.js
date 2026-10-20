@@ -14,7 +14,6 @@ const state = {
     boardQuestions: [],
     boardEditor: null,
     issueOriginView: "",
-    websiteIssuesStatus: "pending",
     submitTopics: [],
     question: null,
     topic: "",
@@ -138,17 +137,19 @@ function setMenuOpen(open) {
     el("menu-toggle").setAttribute("aria-expanded", open ? "true" : "false");
     // the toggle shows only a symbol, so the accessible name must say it
     el("menu-toggle").setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    if (!open) closeDotsMenus();
 }
 
 function isMenuOpen() {
     return el("side-menu").classList.contains("open");
 }
 
-function setView(name, { focusHeading = true, markNav = true } = {}) {
+function setView(name, { markNav = true } = {}) {
     if (state.boardEditor) {
         showError("Drop the expanded card into a board column to save before changing views.");
         return;
     }
+    const leavingPractice = state.view === "practice" && name !== "practice";
     clearBanners();
     closeDotsMenus();
     document.querySelectorAll("dialog[open]").forEach((dialog) => {
@@ -162,22 +163,26 @@ function setView(name, { focusHeading = true, markNav = true } = {}) {
     document.querySelectorAll(".view").forEach((section) => {
         section.hidden = section.id !== "view-" + name;
     });
-    el("progress-trends-nav").hidden = name === "board" || !state.user || state.user.role !== "admin";
     document.querySelectorAll(".nav-btn").forEach((button) => {
         button.classList.toggle("active", markNav && button.dataset.view === name);
     });
+    document.querySelectorAll(".nav-group").forEach((group) => {
+        if (group.querySelector('[data-view="' + name + '"]')) group.open = true;
+    });
     el("question-review-toggle").classList.toggle("active", ["board", "checks", "human-review", "ai-review"].includes(name));
     window.scrollTo({ top: 0, behavior: "smooth" });
-    const heading = document.querySelector("#view-" + name + " h2");
-    if (heading && focusHeading) {
-        heading.tabIndex = -1;
-        heading.focus({ preventScroll: true });
+    if (leavingPractice) {
+        closePracticeRun().then((payload) => {
+            if (payload && state.view === "practice-results") loadPracticeResults();
+        }).catch(() => {});
     }
     if (name === "quiz") ensureQuestion();
     if (name === "practice") showPractice();
     if (name === "practice-results") loadPracticeResults();
     if (name === "stats") loadStats();
+    if (name === "practice-stats") loadPracticeStats();
     if (name === "progress-trends") loadProgressTrends();
+    if (name === "practice-trends") loadPracticeTrends();
     if (name === "website-issues") loadWebsiteIssues();
     if (name === "sessions") loadSessions();
     if (name === "submit") loadSubmitTopics();
@@ -214,10 +219,9 @@ function applyIdentity(payload) {
     document.querySelectorAll(".staff-only").forEach((button) => {
         button.hidden = !signedIn;
     });
-    document.querySelectorAll(".admin-only").forEach((button) => {
+    document.querySelectorAll(".admin-only:not(.view)").forEach((button) => {
         button.hidden = !isAdmin;
     });
-    el("progress-trends-nav").hidden = !isAdmin || state.view === "board";
     document.querySelectorAll(".hide-for-admin").forEach((node) => {
         node.hidden = isAdmin;
     });
@@ -537,6 +541,16 @@ function updatePracticeProgress() {
     el("practice-progress").textContent = parts.join(" · ");
 }
 
+function updatePracticeAnswerControls() {
+    const revealed = state.practice.showAnswer;
+    el("practice-answer-block").hidden = !revealed;
+    el("practice-reveal-btn").hidden = revealed;
+    el("practice-skip-btn").hidden = revealed;
+    el("practice-correct-btn").hidden = !revealed;
+    el("practice-incorrect-btn").hidden = !revealed;
+    el("practice-finish-btn").hidden = false;
+}
+
 function showPracticeStart() {
     el("practice-start").hidden = false;
     el("practice-panel").hidden = true;
@@ -556,19 +570,19 @@ function showPractice() {
 function renderPracticeQuestion(question) {
     state.practice.question = question;
     state.practice.answered = false;
+    state.practice.showAnswer = false;
     setPracticeMenuOpen(false);
 
     el("practice-question-text").textContent = question.question_text;
     el("practice-topic-tag").textContent = question.topic;
     el("practice-topic-tag").hidden = !question.topic;
     el("practice-answer-text").textContent = question.answer_text || "(no answer recorded)";
-    el("practice-answer-block").hidden = !state.practice.showAnswer;
-    el("practice-reveal-btn").textContent = state.practice.showAnswer ? "Hide answer" : "Show answer";
     el("practice-who").textContent = "Practising as " + state.practice.name;
 
     ["practice-correct-btn", "practice-incorrect-btn", "practice-skip-btn"].forEach((id) => {
         el(id).disabled = false;
     });
+    updatePracticeAnswerControls();
     updatePracticeProgress();
 }
 
@@ -643,15 +657,41 @@ async function recordPracticeAnswer(correct, skipped) {
     loadPracticeNext();
 }
 
+function closePracticeRun({ restoreOnError = false } = {}) {
+    const sessionId = state.practice.sessionId;
+    if (!sessionId) return Promise.resolve(null);
+    state.practice.sessionId = null;
+    return api("/api/practice/finish", {
+        method: "POST",
+        body: { practice_session_id: sessionId },
+    }).catch((err) => {
+        if (restoreOnError) state.practice.sessionId = sessionId;
+        throw err;
+    });
+}
+
+function closePracticeRunOnPageHide() {
+    const sessionId = state.practice.sessionId;
+    if (!sessionId) return;
+    state.practice.sessionId = null;
+    fetch("/api/practice/finish", {
+        method: "POST",
+        credentials: "same-origin",
+        keepalive: true,
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": state.csrf || "",
+        },
+        body: JSON.stringify({ practice_session_id: sessionId }),
+    }).catch(() => {});
+}
+
 async function finishPractice() {
     clearBanners();
     try {
-        const payload = await api("/api/practice/finish", {
-            method: "POST",
-            body: { practice_session_id: state.practice.sessionId },
-        });
+        const payload = await closePracticeRun({ restoreOnError: true });
+        if (!payload) return;
         if (!payload.finished || !payload.session) {
-            state.practice.sessionId = null;
             resetPracticeCounters();
             showPracticeStart();
             return;
@@ -705,7 +745,61 @@ function practiceSummaryText(session) {
 function practiceResultTitle(session) {
     const when = formatSessionTime(session.ended_at || session.started_at || "");
     const topic = session.topic ? " · " + session.topic : "";
-    return (session.name || "Someone") + " · " + when + topic;
+    return when + topic;
+}
+
+function practiceSessionDetails(session) {
+    const details = document.createElement("details");
+    details.className = "topic-box";
+
+    const summary = document.createElement("summary");
+    const name = document.createElement("span");
+    name.className = "topic-name";
+    name.textContent = practiceResultTitle(session);
+    const meta = document.createElement("span");
+    meta.className = "topic-meta";
+    meta.textContent = practiceSummaryText(session);
+    summary.appendChild(name);
+    summary.appendChild(meta);
+    details.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "topic-body";
+    const hint = document.createElement("p");
+    hint.className = "muted";
+    hint.textContent = "Loading...";
+    body.appendChild(hint);
+    details.appendChild(body);
+
+    let loaded = false;
+    details.addEventListener("toggle", async () => {
+        if (!details.open || loaded) return;
+        loaded = true;
+        try {
+            const detail = await api("/api/admin/practice-sessions/" + session.id);
+            body.replaceChildren();
+            const list = document.createElement("ul");
+            list.className = "question-list";
+            (detail.attempts || []).forEach((attempt) => {
+                list.appendChild(sessionAttemptItem(attempt));
+            });
+            if (!detail.attempts || !detail.attempts.length) {
+                const empty = document.createElement("p");
+                empty.className = "muted";
+                empty.textContent = "No answers recorded in this run.";
+                body.appendChild(empty);
+            } else {
+                body.appendChild(list);
+            }
+            body.appendChild(
+                makeButton("Delete this run", "no", () => deletePracticeResult(session.id))
+            );
+        } catch (err) {
+            hint.textContent = err.message;
+            loaded = false;
+        }
+    });
+    return details;
 }
 
 async function loadPracticeResults() {
@@ -715,58 +809,48 @@ async function loadPracticeResults() {
         box.replaceChildren();
         const sessions = payload.sessions || [];
         el("practice-results-empty").hidden = sessions.length > 0;
+
+        const groups = new Map();
         sessions.forEach((session) => {
+            const displayName = (session.name || "Someone").trim() || "Someone";
+            const key = displayName.toLocaleLowerCase();
+            if (!groups.has(key)) groups.set(key, { name: displayName, sessions: [] });
+            groups.get(key).sessions.push(session);
+        });
+
+        const sessionTime = (session) =>
+            new Date(session.ended_at || session.started_at || 0).getTime() || 0;
+        const orderedGroups = Array.from(groups.values()).sort((a, b) =>
+            a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+        );
+
+        orderedGroups.forEach((group) => {
+            group.sessions.sort((a, b) => sessionTime(b) - sessionTime(a));
             const details = document.createElement("details");
-            details.className = "topic-box";
+            details.className = "topic-box practice-name-group";
 
             const summary = document.createElement("summary");
             const name = document.createElement("span");
             name.className = "topic-name";
-            name.textContent = practiceResultTitle(session);
+            name.textContent = group.name;
             const meta = document.createElement("span");
             meta.className = "topic-meta";
-            meta.textContent = practiceSummaryText(session);
+            meta.textContent =
+                group.sessions.length +
+                (group.sessions.length === 1 ? " practice run" : " practice runs");
             summary.appendChild(name);
             summary.appendChild(meta);
             details.appendChild(summary);
 
             const body = document.createElement("div");
             body.className = "topic-body";
-            const hint = document.createElement("p");
-            hint.className = "muted";
-            hint.textContent = "Loading...";
-            body.appendChild(hint);
-            details.appendChild(body);
-
-            let loaded = false;
-            details.addEventListener("toggle", async () => {
-                if (!details.open || loaded) return;
-                loaded = true;
-                try {
-                    const detail = await api("/api/admin/practice-sessions/" + session.id);
-                    body.replaceChildren();
-                    const list = document.createElement("ul");
-                    list.className = "question-list";
-                    (detail.attempts || []).forEach((attempt) => {
-                        list.appendChild(sessionAttemptItem(attempt));
-                    });
-                    if (!detail.attempts || !detail.attempts.length) {
-                        const empty = document.createElement("p");
-                        empty.className = "muted";
-                        empty.textContent = "No answers recorded in this run.";
-                        body.appendChild(empty);
-                    } else {
-                        body.appendChild(list);
-                    }
-                    body.appendChild(
-                        makeButton("Delete this run", "no", () => deletePracticeResult(session.id))
-                    );
-                } catch (err) {
-                    hint.textContent = err.message;
-                    loaded = false;
-                }
+            const runs = document.createElement("div");
+            runs.className = "accordion";
+            group.sessions.forEach((session) => {
+                runs.appendChild(practiceSessionDetails(session));
             });
-
+            body.appendChild(runs);
+            details.appendChild(body);
             box.appendChild(details);
         });
     } catch (err) {
@@ -775,15 +859,17 @@ async function loadPracticeResults() {
 }
 
 async function deletePracticeResult(sessionId) {
-    const first = window.confirm(
-        "Delete this practice run?\n\n" +
-            "Every recorded answer in this run will be removed. " +
-            "Questions and the squadron results are kept."
-    );
+    const first = await confirmAction({
+        title: "Delete this practice run?",
+        message: "Every recorded answer in this run will be removed. Questions and the squadron results are kept.",
+        confirmLabel: "Continue",
+    });
     if (!first) return;
-    const second = window.confirm(
-        "This cannot be undone.\n\nClick OK to permanently delete this practice run."
-    );
+    const second = await confirmAction({
+        title: "Delete this practice run permanently?",
+        message: "This cannot be undone.",
+        confirmLabel: "Delete permanently",
+    });
     if (!second) return;
     try {
         const payload = await api("/api/admin/practice-sessions/" + sessionId + "/delete", {
@@ -1134,7 +1220,7 @@ function setPracticeMenuOpen(open) {
 }
 
 function closeDotsMenus(restoreFocus = false) {
-    ["question-menu", "practice-menu"].forEach((id) => {
+    ["question-menu", "practice-menu", "issue-menu"].forEach((id) => {
         if (el(id) && !el(id).hidden) {
             setDotsMenuOpen(id, false);
             if (restoreFocus) el(id + "-btn").focus();
@@ -1443,9 +1529,12 @@ async function editQuestion(question) {
 }
 
 async function deleteQuestion(questionId) {
-    if (!window.confirm(
-        "Delete this question permanently? Its recorded attempts and quiz-history entries will also be removed."
-    )) return;
+    const confirmed = await confirmAction({
+        title: "Delete this question permanently?",
+        message: "Its recorded attempts and quiz-history entries will also be removed.",
+        confirmLabel: "Delete question",
+    });
+    if (!confirmed) return;
     try {
         const payload = await api("/api/admin/questions/" + questionId + "/delete", {
             method: "POST",
@@ -1888,7 +1977,7 @@ function openBoardEditor(question, card, options = {}) {
     requestAnimationFrame(() => el("board-edit-question").focus({ preventScroll: true }));
 }
 
-function cancelBoardEditor() {
+async function cancelBoardEditor() {
     const editor = state.boardEditor;
     if (!editor) return;
     const isNew = editor.isNew;
@@ -1896,7 +1985,14 @@ function cancelBoardEditor() {
         el("board-edit-question").value.trim() !== editor.question.question_text ||
         el("board-edit-answer").value.trim() !== (editor.question.answer_text || "") ||
         el("board-edit-topic").value.trim() !== (editor.question.topic || "");
-    if (changed && !window.confirm(isNew ? "Discard this new question?" : "Discard unsaved changes?")) return;
+    if (changed) {
+        const confirmed = await confirmAction({
+            title: isNew ? "Discard this new question?" : "Discard unsaved changes?",
+            message: "The changes in the editor will be lost.",
+            confirmLabel: "Discard",
+        });
+        if (!confirmed) return;
+    }
     closeBoardEditor();
 }
 
@@ -1986,13 +2082,34 @@ async function moveBoardQuestion(questionId, targetState, skipConfirmation) {
         showError("Only accepted questions can be archived. Reject or delete this submission from its editor.");
         return;
     }
-    if (!skipConfirmation && targetState === "archive" && !question.archived_at &&
-            !window.confirm("Archive this question? It will leave quizzes while its history is kept.")) return;
+    if (!skipConfirmation && targetState === "archive" && !question.archived_at) {
+        const confirmed = await confirmAction({
+            title: "Archive this question?",
+            message: "It will leave quizzes while its history is kept.",
+            confirmLabel: "Archive",
+            danger: false,
+        });
+        if (!confirmed) return;
+    }
     if (!skipConfirmation && ["active", "time-sensitive"].includes(targetState) &&
-            ["pending", "rejected"].includes(question.status) &&
-            !window.confirm("Approve this question and add it to quizzes?")) return;
-    if (!skipConfirmation && ["active", "time-sensitive"].includes(targetState) && question.ai_pending &&
-            !window.confirm("Apply the proposed update and return this question to quizzes?")) return;
+            ["pending", "rejected"].includes(question.status)) {
+        const confirmed = await confirmAction({
+            title: "Approve this question?",
+            message: "It will be added to quizzes.",
+            confirmLabel: "Approve",
+            danger: false,
+        });
+        if (!confirmed) return;
+    }
+    if (!skipConfirmation && ["active", "time-sensitive"].includes(targetState) && question.ai_pending) {
+        const confirmed = await confirmAction({
+            title: "Apply the proposed update?",
+            message: "This question will return to quizzes.",
+            confirmLabel: "Apply update",
+            danger: false,
+        });
+        if (!confirmed) return;
+    }
     try {
         const payload = await api("/api/admin/questions/" + questionId + "/board-state", {
             method: "POST", body: { state: targetState },
@@ -2046,10 +2163,24 @@ async function saveBoardEditorAndMove(targetState) {
     }
     const changed = fields.question_text !== question.question_text || fields.answer_text !== (question.answer_text || "") || fields.topic !== (question.topic || "");
     if (["active", "time-sensitive"].includes(targetState) &&
-            ["pending", "rejected"].includes(question.status) &&
-            !window.confirm("Approve this question and add it to quizzes?")) return;
-    if (["active", "time-sensitive"].includes(targetState) && question.ai_pending &&
-            !window.confirm("Apply the proposed update and return this question to quizzes?")) return;
+            ["pending", "rejected"].includes(question.status)) {
+        const confirmed = await confirmAction({
+            title: "Approve this question?",
+            message: "It will be added to quizzes.",
+            confirmLabel: "Approve",
+            danger: false,
+        });
+        if (!confirmed) return;
+    }
+    if (["active", "time-sensitive"].includes(targetState) && question.ai_pending) {
+        const confirmed = await confirmAction({
+            title: "Apply the proposed update?",
+            message: "This question will return to quizzes.",
+            confirmLabel: "Apply update",
+            danger: false,
+        });
+        if (!confirmed) return;
+    }
     try {
         if (changed) await api("/api/admin/questions/" + question.id + "/edit", { method: "POST", body: fields });
         if (targetState !== "reported" && (targetState !== editor.originalState || changed || question.status === "pending" && targetState === "active")) {
@@ -2105,7 +2236,13 @@ async function reviewFromBank(questionId, status) {
 }
 
 async function archiveQuestion(questionId) {
-    if (!window.confirm("Archive this question? It will leave the quiz, but its history will be kept.")) {
+    const confirmed = await confirmAction({
+        title: "Archive this question?",
+        message: "It will leave the quiz, but its history will be kept.",
+        confirmLabel: "Archive",
+        danger: false,
+    });
+    if (!confirmed) {
         return;
     }
     try {
@@ -2150,15 +2287,17 @@ function statTile(value, label) {
 }
 
 async function resetProgress() {
-    const first = window.confirm(
-        "Delete all progress for the whole squadron?\n\n" +
-            "Every recorded correct, incorrect and skipped answer will be removed. " +
-            "Questions, staff/NCO accounts and the question bank are kept."
-    );
+    const first = await confirmAction({
+        title: "Delete all squadron progress?",
+        message: "Every recorded correct, incorrect and skipped answer will be removed. Questions, staff/NCO accounts and the question bank are kept.",
+        confirmLabel: "Continue",
+    });
     if (!first) return;
-    const second = window.confirm(
-        "This cannot be undone.\n\nClick OK to permanently delete all recorded progress."
-    );
+    const second = await confirmAction({
+        title: "Delete all recorded progress permanently?",
+        message: "This cannot be undone.",
+        confirmLabel: "Delete all progress",
+    });
     if (!second) return;
     try {
         await api("/api/admin/reset-progress", { method: "POST", body: { confirm: true } });
@@ -2167,6 +2306,64 @@ async function resetProgress() {
     } catch (err) {
         showError(err.message);
     }
+}
+
+// In-page replacement for window.confirm.
+function confirmAction(options) {
+    return new Promise((resolve) => {
+        const dialog = document.createElement("dialog");
+        dialog.className = "modal";
+
+        const form = document.createElement("form");
+        form.className = "modal-form";
+
+        const title = document.createElement("h3");
+        title.textContent = options.title || "Are you sure?";
+        form.appendChild(title);
+
+        if (options.message) {
+            const message = document.createElement("p");
+            message.className = "hint";
+            message.textContent = options.message;
+            form.appendChild(message);
+        }
+
+        const row = document.createElement("div");
+        row.className = "modal-actions";
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "ghost";
+        cancel.textContent = options.cancelLabel || "Cancel";
+        const confirm = document.createElement("button");
+        confirm.type = "submit";
+        confirm.className = options.danger === false ? "primary" : "no";
+        confirm.textContent = options.confirmLabel || "Delete";
+        row.appendChild(cancel);
+        row.appendChild(confirm);
+        form.appendChild(row);
+
+        function close(result) {
+            dialog.close();
+            dialog.remove();
+            resolve(result);
+        }
+        dialog.closePrompt = close;
+
+        cancel.addEventListener("click", () => close(false));
+        dialog.addEventListener("cancel", (event) => {
+            event.preventDefault();
+            close(false);
+        });
+        form.addEventListener("submit", (event) => {
+            event.preventDefault();
+            close(true);
+        });
+
+        dialog.appendChild(form);
+        document.body.appendChild(dialog);
+        dialog.showModal();
+        confirm.focus();
+    });
 }
 
 // Replaces window.prompt: builds a real form in the page and resolves with the
@@ -2340,10 +2537,10 @@ function makeTrendSvg(label) {
     return svg;
 }
 
-function renderVolumeChart(weeks) {
-    const host = el("trend-volume-chart");
+function renderVolumeChart(weeks, hostId = "trend-volume-chart", scope = "squadron") {
+    const host = el(hostId);
     host.replaceChildren();
-    const svg = makeTrendSvg("Stacked bar chart of correct, incorrect, and skipped answers for each of the last 12 weeks");
+    const svg = makeTrendSvg("Stacked bar chart of correct, incorrect, and skipped " + scope + " answers for each of the last 12 weeks");
     const colors = { correct: "#4f8a56", incorrect: "#b45d53", skipped: "#9aaab3" };
     const maxValue = Math.max(1, ...weeks.map((week) => week.correct + week.incorrect + week.skipped));
     const left = 46, right = 704, top = 18, bottom = 226, chartHeight = bottom - top;
@@ -2385,8 +2582,8 @@ function renderVolumeChart(weeks) {
     host.appendChild(legend);
 }
 
-function renderAccuracyChart(weeks, minimumSample) {
-    const host = el("trend-accuracy-chart");
+function renderAccuracyChart(weeks, minimumSample, hostId = "trend-accuracy-chart", scope = "squadron") {
+    const host = el(hostId);
     host.replaceChildren();
     const eligible = weeks.filter((week) => week.scored >= minimumSample);
     if (!eligible.length) {
@@ -2396,7 +2593,7 @@ function renderAccuracyChart(weeks, minimumSample) {
         host.appendChild(note);
         return;
     }
-    const svg = makeTrendSvg("Line chart of weekly squadron accuracy for weeks with at least " + minimumSample + " scored answers");
+    const svg = makeTrendSvg("Line chart of weekly " + scope + " accuracy for weeks with at least " + minimumSample + " scored answers");
     const left = 46, right = 704, top = 22, bottom = 226;
     const chartHeight = bottom - top;
     for (let tick = 0; tick <= 4; tick++) {
@@ -2457,16 +2654,33 @@ async function loadProgressTrends() {
     }
 }
 
-async function loadWebsiteIssues(status = "pending") {
-    state.websiteIssuesStatus = status;
-    el("website-issues-pending").classList.toggle("active", status === "pending");
-    el("website-issues-resolved").classList.toggle("active", status === "resolved");
+async function loadPracticeTrends() {
+    try {
+        const payload = await api("/api/admin/practice-trends");
+        const weeks = payload.weeks || [];
+        const total = weeks.reduce((sum, week) => sum + week.correct + week.incorrect + week.skipped, 0);
+        el("practice-trends-empty").hidden = total > 0;
+        el("practice-trend-volume-chart").parentElement.hidden = total === 0;
+        el("practice-trend-accuracy-chart").parentElement.hidden = total === 0;
+        if (total > 0) {
+            renderVolumeChart(weeks, "practice-trend-volume-chart", "practice");
+            renderAccuracyChart(
+                weeks, payload.minimum_sample || 5,
+                "practice-trend-accuracy-chart", "practice"
+            );
+        }
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function loadWebsiteIssues() {
     const list = el("website-issues-list");
     const empty = el("website-issues-empty");
     list.replaceChildren();
     empty.hidden = true;
     try {
-        const payload = await api("/api/admin/website-issues?status=" + encodeURIComponent(status));
+        const payload = await api("/api/admin/website-issues");
         const issues = payload.issues || [];
         empty.hidden = issues.length > 0;
         issues.forEach((issue) => {
@@ -2483,19 +2697,14 @@ async function loadWebsiteIssues(status = "pending") {
 
             const meta = document.createElement("div");
             meta.className = "q-meta";
-            meta.appendChild(chip(issue.status, issue.status === "pending" ? "chip-pending" : "chip-approved"));
-            if (issue.reporter_name) meta.appendChild(chip("from " + issue.reporter_name, ""));
             if (issue.created_at) meta.appendChild(chip(formatSessionTime(issue.created_at), ""));
             if (issue.page) meta.appendChild(chip("page: " + issue.page, ""));
             item.appendChild(meta);
 
-            if (issue.status === "pending") {
-                const actions = document.createElement("div");
-                actions.className = "q-actions";
-                actions.appendChild(makeButton("Mark fixed", "ok", () => resolveWebsiteIssue(issue.id, "resolved")));
-                actions.appendChild(makeButton("Dismiss", "no", () => resolveWebsiteIssue(issue.id, "dismissed")));
-                item.appendChild(actions);
-            }
+            const actions = document.createElement("div");
+            actions.className = "q-actions";
+            actions.appendChild(makeButton("Delete report", "no", () => deleteWebsiteIssue(issue.id)));
+            item.appendChild(actions);
             list.appendChild(item);
         });
     } catch (err) {
@@ -2503,13 +2712,17 @@ async function loadWebsiteIssues(status = "pending") {
     }
 }
 
-async function resolveWebsiteIssue(issueId, action) {
+async function deleteWebsiteIssue(issueId) {
+    const confirmed = await confirmAction({
+        title: "Delete this website issue report?",
+        message: "The report will be removed permanently.",
+        confirmLabel: "Delete report",
+    });
+    if (!confirmed) return;
     try {
-        await api("/api/admin/website-issues/" + issueId + "/resolve", {
-            method: "POST", body: { action },
-        });
-        showOk(action === "resolved" ? "Website issue marked fixed." : "Website issue dismissed.");
-        loadWebsiteIssues(state.websiteIssuesStatus);
+        await api("/api/admin/website-issues/" + issueId + "/delete", { method: "POST" });
+        showOk("Website issue report deleted.");
+        loadWebsiteIssues();
     } catch (err) {
         showError(err.message);
     }
@@ -2522,7 +2735,6 @@ async function submitWebsiteIssue(event) {
         const payload = await api("/api/website-issues", {
             method: "POST",
             body: {
-                reporter_name: el("website-issue-name").value.trim(),
                 title: el("website-issue-title").value.trim(),
                 details: el("website-issue-details").value.trim(),
                 page: state.issueOriginView || "unknown",
@@ -2535,68 +2747,84 @@ async function submitWebsiteIssue(event) {
     }
 }
 
+function renderStats(payload, overallId, topicsId, emptyId, accuracyName) {
+    const overallBox = el(overallId);
+    const topicBox = el(topicsId);
+
+    overallBox.replaceChildren();
+    [
+        [payload.overall.asked, "questions asked"],
+        [payload.overall.correct, "correct"],
+        [payload.overall.incorrect, "incorrect"],
+        [payload.overall.skipped, "skipped"],
+        [accuracyLabel(payload.overall.accuracy), accuracyName],
+    ].forEach(([value, label]) => overallBox.appendChild(statTile(value, label)));
+
+    const byTopic = new Map();
+    payload.questions.forEach((question) => {
+        if (!byTopic.has(question.topic)) byTopic.set(question.topic, []);
+        byTopic.get(question.topic).push(question);
+    });
+
+    topicBox.replaceChildren();
+    el(emptyId).hidden = payload.topics.length > 0;
+
+    payload.topics.forEach((topic) => {
+        const details = document.createElement("details");
+        details.className = "topic-box";
+
+        const summary = document.createElement("summary");
+        const name = document.createElement("span");
+        name.className = "topic-name";
+        name.textContent = topic.topic;
+        const meta = document.createElement("span");
+        meta.className = "topic-meta";
+        meta.textContent =
+            topic.question_count +
+            " question(s) · " +
+            topic.asked +
+            " asked · " +
+            accuracyLabel(topic.accuracy);
+        summary.appendChild(name);
+        summary.appendChild(meta);
+        details.appendChild(summary);
+
+        const body = document.createElement("div");
+        body.className = "topic-body";
+        const list = document.createElement("ul");
+        list.className = "question-list";
+        (byTopic.get(topic.topic) || []).forEach((question) => {
+            list.appendChild(
+                questionListItem(question, {
+                    asked: question.asked,
+                    correct: question.correct,
+                    incorrect: question.incorrect,
+                    extra: accuracyLabel(question.accuracy),
+                })
+            );
+        });
+        body.appendChild(list);
+        details.appendChild(body);
+        topicBox.appendChild(details);
+    });
+}
+
 async function loadStats() {
-    const overallBox = el("overall-stats");
-    const topicBox = el("stats-topics");
     try {
         const payload = await api("/api/stats");
+        renderStats(payload, "overall-stats", "stats-topics", "stats-empty", "squadron accuracy");
+    } catch (err) {
+        showError(err.message);
+    }
+}
 
-        overallBox.replaceChildren();
-        [
-            [payload.overall.asked, "questions asked"],
-            [payload.overall.correct, "correct"],
-            [payload.overall.incorrect, "incorrect"],
-            [payload.overall.skipped, "skipped"],
-            [accuracyLabel(payload.overall.accuracy), "squadron accuracy"],
-        ].forEach(([value, label]) => overallBox.appendChild(statTile(value, label)));
-
-        const byTopic = new Map();
-        payload.questions.forEach((question) => {
-            if (!byTopic.has(question.topic)) byTopic.set(question.topic, []);
-            byTopic.get(question.topic).push(question);
-        });
-
-        topicBox.replaceChildren();
-        el("stats-empty").hidden = payload.topics.length > 0;
-
-        payload.topics.forEach((topic) => {
-            const details = document.createElement("details");
-            details.className = "topic-box";
-
-            const summary = document.createElement("summary");
-            const name = document.createElement("span");
-            name.className = "topic-name";
-            name.textContent = topic.topic;
-            const meta = document.createElement("span");
-            meta.className = "topic-meta";
-            meta.textContent =
-                topic.question_count +
-                " question(s) · " +
-                topic.asked +
-                " asked · " +
-                accuracyLabel(topic.accuracy);
-            summary.appendChild(name);
-            summary.appendChild(meta);
-            details.appendChild(summary);
-
-            const body = document.createElement("div");
-            body.className = "topic-body";
-            const list = document.createElement("ul");
-            list.className = "question-list";
-            (byTopic.get(topic.topic) || []).forEach((question) => {
-                list.appendChild(
-                    questionListItem(question, {
-                        asked: question.asked,
-                        correct: question.correct,
-                        incorrect: question.incorrect,
-                        extra: accuracyLabel(question.accuracy),
-                    })
-                );
-            });
-            body.appendChild(list);
-            details.appendChild(body);
-            topicBox.appendChild(details);
-        });
+async function loadPracticeStats() {
+    try {
+        const payload = await api("/api/admin/practice-stats");
+        renderStats(
+            payload, "practice-overall-stats", "practice-stats-topics",
+            "practice-stats-empty", "practice accuracy"
+        );
     } catch (err) {
         showError(err.message);
     }
@@ -2735,15 +2963,17 @@ async function loadSessions() {
 }
 
 async function deleteQuizSession(sessionId) {
-    const first = window.confirm(
-        "Delete this quiz session?\n\n" +
-            "Every recorded correct, incorrect and skipped answer in this session will be removed. " +
-            "Questions, staff/NCO accounts and the question bank are kept."
-    );
+    const first = await confirmAction({
+        title: "Delete this quiz session?",
+        message: "Every recorded correct, incorrect and skipped answer in this session will be removed. Questions, staff/NCO accounts and the question bank are kept.",
+        confirmLabel: "Continue",
+    });
     if (!first) return;
-    const second = window.confirm(
-        "This cannot be undone.\n\nClick OK to permanently delete this quiz session."
-    );
+    const second = await confirmAction({
+        title: "Delete this quiz session permanently?",
+        message: "This cannot be undone.",
+        confirmLabel: "Delete permanently",
+    });
     if (!second) return;
     try {
         const payload = await api("/api/admin/quiz-sessions/" + sessionId + "/delete", {
@@ -2903,13 +3133,16 @@ function bindEvents() {
     });
     el("menu-toggle").addEventListener("click", () => setMenuOpen(!isMenuOpen()));
     el("menu-overlay").addEventListener("click", () => setMenuOpen(false));
-    el("menu-issue-btn").addEventListener("click", () => {
+    el("issue-menu-btn").addEventListener("click", (event) => {
+        event.stopPropagation();
+        setDotsMenuOpen("issue-menu", el("issue-menu").hidden);
+    });
+    el("issue-report-btn").addEventListener("click", () => {
+        setDotsMenuOpen("issue-menu", false);
         state.issueOriginView = state.view || "unknown";
         setView("report-issue");
     });
     el("website-issue-form").addEventListener("submit", submitWebsiteIssue);
-    el("website-issues-pending").addEventListener("click", () => loadWebsiteIssues("pending"));
-    el("website-issues-resolved").addEventListener("click", () => loadWebsiteIssues("resolved"));
     document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.boardEditor && window.matchMedia("(max-width: 680px)").matches) {
             event.preventDefault();
@@ -2956,12 +3189,14 @@ function bindEvents() {
                 setView("password");
             } else {
                 resetSessionCounters();
-                setView("quiz", { focusHeading: false });
+                setView("quiz");
             }
         } catch (err) {
             showError(err.message);
         }
     });
+
+    window.addEventListener("pagehide", closePracticeRunOnPageHide);
 
     el("logout-btn").addEventListener("click", async () => {
         try {
@@ -3085,13 +3320,17 @@ function bindEvents() {
         column.addEventListener("dragleave", (event) => {
             if (!column.contains(event.relatedTarget)) column.classList.remove("is-over");
         });
-        column.addEventListener("drop", (event) => {
+        column.addEventListener("drop", async (event) => {
             if (!state.boardDragged) return;
             event.preventDefault();
             column.classList.remove("is-over");
             if (column.dataset.boardAction === "delete") {
                 if (state.boardEditor?.isNew && state.boardDragged.card === state.boardEditor.card) {
-                    if (window.confirm("Discard this unsaved question?")) closeBoardEditor();
+                    if (await confirmAction({
+                        title: "Discard this unsaved question?",
+                        message: "The new question has not been saved.",
+                        confirmLabel: "Discard",
+                    })) closeBoardEditor();
                     return;
                 }
                 deleteQuestion(state.boardDragged.questionId);
@@ -3199,10 +3438,8 @@ function bindEvents() {
     el("practice-empty-finish").addEventListener("click", finishPractice);
 
     el("practice-reveal-btn").addEventListener("click", () => {
-        state.practice.showAnswer = !state.practice.showAnswer;
-        localStorage.setItem("practice.showAnswer", state.practice.showAnswer ? "1" : "0");
-        el("practice-answer-block").hidden = !state.practice.showAnswer;
-        el("practice-reveal-btn").textContent = state.practice.showAnswer ? "Hide answer" : "Show answer";
+        state.practice.showAnswer = true;
+        updatePracticeAnswerControls();
     });
 
     el("practice-restart").addEventListener("click", async () => {
@@ -3360,8 +3597,6 @@ function bindEvents() {
 
 async function boot() {
     bindEvents();
-    state.practice.showAnswer = localStorage.getItem("practice.showAnswer") === "1";
-    el("practice-reveal-btn").textContent = state.practice.showAnswer ? "Hide answer" : "Show answer";
     try {
         const payload = await api("/api/auth/me");
         applyIdentity(payload);
@@ -3370,7 +3605,7 @@ async function boot() {
             if (state.user.role === "admin" && state.user.must_change) setView("password");
             else {
                 resetSessionCounters();
-                setView("quiz", { focusHeading: false, markNav: false });
+                setView("quiz", { markNav: false });
             }
         } else {
             setView("practice");

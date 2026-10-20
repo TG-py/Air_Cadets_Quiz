@@ -32,7 +32,8 @@ check("nav and session bar are not in the header",
 check("login link renamed to Staff/NCO login", "Staff/NCO login" in index_html)
 check("old login wording removed", "Staff log in" not in index_html)
 for view in ("quiz", "practice", "submit", "stats", "progress-trends", "sessions",
-             "practice-results", "board", "website-issues", "users"):
+             "practice-stats", "practice-trends", "practice-results",
+             "board", "website-issues", "users"):
     check("menu still offers the %s view" % view, 'data-view="%s"' % view in index_html)
 check("menu can be opened and closed", "setMenuOpen" in app_js)
 check("redundant close button is removed", 'id="menu-close"' not in index_html
@@ -183,6 +184,10 @@ check("the old detached-div bug is caught by this test",
     35: r'''
 print("\n[33] no browser prompt boxes remain")
 check("no window.prompt calls remain", "window.prompt(" not in app_js, "still prompting")
+check("no browser confirm or alert calls remain",
+      "window.confirm(" not in app_js and "window.alert(" not in app_js, "still using browser popups")
+check("confirmations use an in-page dialog",
+      "function confirmAction(" in app_js and "confirmAction({" in app_js, "no confirm dialog")
 check("an in-page dialog is used instead",
       "function askForValues(" in app_js and "dialog.showModal()" in app_js, "no dialog helper")
 check("the dialog can be cancelled or escaped away",
@@ -220,22 +225,34 @@ check("question options use disclosure semantics", 'aria-controls="question-menu
       and 'role="menuitem"' not in index_html)
 check("mobile question editor traps keyboard focus", "document.activeElement === first" in app_js
       and "document.activeElement === last" in app_js)
-check("page navigation moves focus to the selected heading", "heading.focus({ preventScroll: true })" in app_js)
+check("page navigation does not select or focus the destination heading",
+      "heading.focus" not in app_js and "focusHeading" not in app_js)
 check("progress trends page is admin-only", 'class="view admin-only" id="view-progress-trends"' in index_html)
 check("the website issue form has its own page", 'id="view-report-issue"' in index_html
       and 'id="website-issue-form"' in index_html)
-check("the menu offers website issue reporting", 'id="menu-issue-btn"' in index_html
-      and 'aria-label="Report a website issue"' in index_html)
+check("the website issue form does not ask for a name", 'id="website-issue-name"' not in index_html)
+check("the menu offers website issue reporting", 'id="issue-menu-btn"' in index_html
+      and 'aria-label="Website issue options"' in index_html
+      and 'id="issue-menu"' in index_html and 'id="issue-report-btn"' in index_html)
+check("the issue report button opens the form from its menu option",
+      'el("issue-report-btn")' in app_js and 'setView("report-issue")' in app_js
+      and 'state.issueOriginView' in app_js)
 check("admins get a separate website issue page", 'id="view-website-issues"' in index_html
-      and 'data-view="website-issues"' in index_html)
+      and 'id="website-issues-nav"' in index_html and 'data-view="website-issues"' in index_html)
+website_issues_js = app_js.split("async function loadWebsiteIssues(")[1].split("\nasync function ")[0]
+check("website issue reports use one list with delete buttons",
+      "Handled reports" not in index_html and 'id="website-issues-pending"' not in index_html
+      and "Mark fixed" not in website_issues_js and 'Delete report' in website_issues_js)
 set_view = app_js.split("function setView(")[1].split("\nfunction ")[0]
 check("view switching clears stale banners", "clearBanners();" in set_view)
 check("view switching closes question menus", "closeDotsMenus();" in set_view)
 check("view switching closes open dialogs", 'dialog[open]' in set_view and "dialog.close()" in set_view)
 check("view switching closes the navigation drawer", "setMenuOpen(false);" in set_view)
 check("view switching hides the previous view", 'section.id !== "view-" + name' in set_view)
-check("progress trends navigation is hidden on the all questions board",
-      'progress-trends-nav' in set_view and 'name === "board"' in set_view)
+check("admin navigation tabs stay available on every view", "syncAdminNav" not in app_js
+      and 'id="progress-trends-nav"' in index_html and 'id="website-issues-nav"' in index_html)
+check("identity refreshes do not unhide admin-only page sections",
+      'querySelectorAll(".admin-only:not(.view)")' in app_js)
     ''',
     44: r'''
 print("\n[41] website issue reporting")
@@ -262,18 +279,14 @@ check("an admin sees the website issue", status == 200 and len(found) == 1, str(
 check("the report keeps its page and anonymous status",
       bool(found) and found[0]["page"] == "practice" and found[0]["reported_by"] is None,
       str(found[:1]))
-status, payload, _ = admin.post(
-    "/api/admin/website-issues/%d/resolve" % issue_id, {"action": "dismissed"}
-)
-check("an admin can dismiss a website issue", status == 200, str(payload))
-status, payload, _ = admin.get("/api/admin/website-issues?status=resolved")
-handled = [issue for issue in payload.get("issues", []) if issue["id"] == issue_id]
-check("a handled website issue moves out of the open list",
-      status == 200 and len(handled) == 1 and handled[0]["status"] == "dismissed",
-      str(handled[:1]))
-status, payload, _ = admin.post(
-    "/api/admin/website-issues/%d/resolve" % issue_id, {"action": "resolved"}
-)
-check("a handled website issue cannot be handled twice", status == 409, str(status))
+status, payload, _ = staff_live.post("/api/admin/website-issues/%d/delete" % issue_id)
+check("staff cannot delete website issue reports", status == 403, str(status))
+status, payload, _ = admin.post("/api/admin/website-issues/%d/delete" % issue_id)
+check("an admin can delete a website issue", status == 200, str(payload))
+status, payload, _ = admin.get("/api/admin/website-issues")
+deleted = [issue for issue in payload.get("issues", []) if issue["id"] == issue_id]
+check("a deleted website issue leaves the list", status == 200 and not deleted, str(payload)[:200])
+status, payload, _ = admin.post("/api/admin/website-issues/%d/delete" % issue_id)
+check("a deleted website issue cannot be deleted twice", status == 404, str(status))
     ''',
 }

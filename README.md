@@ -21,7 +21,7 @@ No external dependencies. Python 3.9+ standard library and SQLite only.
 | --- | --- |
 | Cadet (no login) | Practise questions under your own name, submit new questions on the Submit page, pick an existing topic or add a new one |
 | NCO / staff | Log in, ask questions, record correct/incorrect or skip, add questions directly, see progress |
-| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, review reported questions, archive and restore accepted questions, permanently delete questions and their history, flag questions whose answers may change, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, review solo practice runs, delete all progress |
+| Admin | Everything staff/NCO can do, plus approve or reject submitted questions, review reported questions, archive and restore accepted questions, permanently delete questions and their history, flag questions whose answers may change, import a question list, create, edit and disable staff/NCO accounts, review finished quiz sessions, review solo practice runs and practice statistics, delete all progress |
 
 Only staff/NCO and admins can see questions or record answers - cadets get a 401 on
 those endpoints. Cadets see the Submit page and nothing else.
@@ -35,11 +35,22 @@ pick a topic, and work through the same active question bank on your own.
 The page is styled differently on purpose (green solo-practice banner and
 card) so it cannot be mistaken for asking the squadron.
 
+Each question starts with its answer hidden. At that point you can **Show
+answer**, **Skip**, or **Finish practice**. Revealing the answer replaces the
+reveal and skip options with **Got it right** and **Got it wrong**. Questions
+are drawn from the same squadron-history weighting as the main quiz, so the
+questions the squadron struggles with come up more often.
+
 Practice scores are recorded separately and never touch the squadron
-scoreboard. Admins get a *Practice results* page listing every finished run,
-newest first: who practised, when, and each question with its answer and
-whether it was right, wrong or skipped. A run can be deleted on its own
-after the usual double confirmation.
+scoreboard or its weighting. A run closes automatically when you leave the
+practice page or close the app, so its score is saved without needing the
+Finish button.
+
+Admins get a *Practice results* page grouped by the name used to practise,
+with names in alphabetical order and the newest run first inside each name.
+Opening a run shows when it happened and each question with its answer and
+whether it was right, wrong or skipped. A run can be deleted on its own after
+the usual double confirmation.
 
 Anyone practising can report a wrong question from the three-dots menu on
 the card, exactly like NCOs asking the squadron. Signed-in staff report
@@ -52,10 +63,11 @@ optional - a bare flag is enough. Reports land on the admin *Reports* page,
 newest first, where each one can be marked fixed or dismissed
 after checking the bank.
 
-The three-dots button beside the menu title opens a website issue form. Anyone
-can send a short title and description; the current page and signed-in identity
-are attached when available. Admins review these in **Website issue reports**
-and can mark each one fixed or dismiss it.
+The three-dots button beside the menu title opens a menu with a **Report a
+website issue** option. Choosing it opens a form where anyone can send a short
+title and description; the current page is attached. Admins see every report in
+one list on **Website issue reports** and can delete each one after dealing with
+it.
 
 ## Running it
 
@@ -148,6 +160,13 @@ The *Progress* page is built in three layers:
    was asked, how often the squad got it right or wrong, and its accuracy.
 
 That is the page to look at when deciding what to drill next week.
+
+The *Progress* menu is split into two expandable groups. **Squadron progress**
+contains the squadron page, its trends and quiz sessions. **Practice progress**
+contains *Overall practice data*, *Practice trends* and *Practice results*.
+The practice pages use the same topic and accuracy layout as the squadron
+pages, but only count solo practice answers, so they stay separate from the
+squadron scoreboard.
 
 Admins can archive an accepted question from the question bank. Archived
 questions are removed from the quiz but keep their answer history; restoring

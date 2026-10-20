@@ -296,6 +296,33 @@ mine = [s for s in payload["sessions"] if s["name"] == "Practice Tester"]
 check("the admin sees the finished run",
       status == 200 and len(mine) == 1 and mine[0]["asked"] == approved, str(payload)[:200])
 detail_id = mine[0]["id"]
+
+status, payload, _ = admin.get("/api/admin/practice-stats")
+check("admin gets overall practice data",
+      status == 200 and payload["overall"]["asked"] == approved
+      and payload["overall"]["correct"] == approved
+      and len(payload["questions"]) == approved, str(payload)[:240])
+check("practice stats group questions by topic",
+      len(payload["topics"]) > 0
+      and sum(t["asked"] for t in payload["topics"]) == approved,
+      str(payload.get("topics"))[:200])
+status, payload, _ = staff_live.get("/api/admin/practice-stats")
+check("staff/NCO cannot see overall practice data", status == 403, str(status))
+status, payload, _ = guest.get("/api/admin/practice-stats")
+check("guests cannot see overall practice data", status == 401, str(status))
+
+status, payload, _ = admin.get("/api/admin/practice-trends")
+check("admin gets 12 practice trend buckets",
+      status == 200 and len(payload.get("weeks", [])) == 12
+      and sum(w["correct"] + w["incorrect"] + w["skipped"]
+              for w in payload["weeks"]) == approved, str(payload)[:240])
+check("practice trends explain their small-sample threshold",
+      payload.get("minimum_sample") == 5, str(payload)[:120])
+status, payload, _ = staff_live.get("/api/admin/practice-trends")
+check("staff/NCO cannot see practice trends", status == 403, str(status))
+status, payload, _ = guest.get("/api/admin/practice-trends")
+check("guests cannot see practice trends", status == 401, str(status))
+
 status, payload, _ = admin.get("/api/admin/practice-sessions/%d" % detail_id)
 bank = {q["id"]: q for q in admin.get("/api/questions?status=approved")[1]["questions"]}
 check("the run opens with every question and answer",
@@ -315,6 +342,34 @@ check("the admin can delete the run", status == 200, str(payload))
 check("the deleted run is gone",
       all(s["id"] != detail_id
           for s in admin.get("/api/admin/practice-sessions")[1]["sessions"]))
+
+
+def short_practice_run(name):
+    status, payload, _ = cadet.post("/api/practice/start", {"name": name})
+    session_id = payload["practice_session_id"]
+    status, payload, _ = cadet.get(
+        "/api/practice/next?practice_session_id=%d" % session_id)
+    cadet.post("/api/practice/attempts", {
+        "practice_session_id": session_id,
+        "question_id": payload["question"]["id"],
+        "correct": True,
+    })
+    cadet.post("/api/practice/finish", {"practice_session_id": session_id})
+    return session_id
+
+
+older_group_run = short_practice_run("Grouped Tester")
+time.sleep(1.1)
+newer_group_run = short_practice_run("Grouped Tester")
+short_practice_run("Alpha Tester")
+status, payload, _ = admin.get("/api/admin/practice-sessions")
+listed = payload["sessions"]
+names = [s["name"] for s in listed]
+check("practice results are ordered alphabetically by name",
+      names == sorted(names, key=str.casefold), str(names))
+group_ids = [s["id"] for s in listed if s["name"] == "Grouped Tester"]
+check("runs under one name are ordered newest first",
+      group_ids.index(newer_group_run) < group_ids.index(older_group_run), str(group_ids))
     ''',
     40: r'''
 print("\n[37] anyone can report a wrong question")
@@ -359,8 +414,47 @@ check("practice asks for a name first", 'id="practice-name"' in served_index
       and "Enter your name" in served_index, "no name gate")
 check("practice offers the same report menu", 'id="practice-report-btn"' in served_index
       and "Report incorrect question" in served_index, "no report option")
+check("practice hides each answer until the user reveals it",
+      'id="practice-correct-btn" hidden' in served_index
+      and 'id="practice-incorrect-btn" hidden' in served_index
+      and "state.practice.showAnswer = false;" in app_js
+      and 'localStorage.getItem("practice.showAnswer")' not in app_js,
+      "answer or scoring controls are visible up front")
+check("practice swaps in scoring only after the answer is shown",
+      'el("practice-reveal-btn").hidden = revealed' in app_js
+      and 'el("practice-correct-btn").hidden = !revealed' in app_js
+      and 'el("practice-skip-btn").hidden = revealed' in app_js,
+      "reveal and scoring controls overlap")
+practice_py = open(os.path.join(ROOT, "api_practice.py"), encoding="utf-8").read()
+check("practice uses the squadron-weighted question pool",
+      "quiz.build_pool(ctx.conn, topic)" in practice_py
+      and "quiz.pick(pool, answered)" in practice_py,
+      "practice does not share the squadron weighting")
 check("practice result rows reuse the answered styling",
       "sessionAttemptItem" in app_js and "loadPracticeResults" in app_js,
       "no results rendering")
+check("practice results are grouped under cadet names",
+      "practice-name-group" in app_js and "practiceSessionDetails" in app_js,
+      "results are still a flat list")
+check("practice names sort alphabetically and runs sort by date",
+      "localeCompare(b.name" in app_js and "sessionTime(b) - sessionTime(a)" in app_js,
+      "practice results do not sort as requested")
+check("leaving practice closes and saves the run",
+      "leavingPractice" in app_js and "closePracticeRun" in app_js
+      and "pagehide" in app_js and "keepalive: true" in app_js,
+      "practice run is not saved when leaving")
+check("the practice progress pages exist",
+      'id="view-practice-stats"' in served_index
+      and 'id="view-practice-trends"' in served_index, "missing practice progress pages")
+check("progress is split into expandable squad and practice groups",
+      'id="squadron-progress-group"' in served_index
+      and 'id="practice-progress-group"' in served_index
+      and 'data-view="practice-stats"' in served_index
+      and 'data-view="practice-trends"' in served_index,
+      "progress menu is not split into expandable groups")
+check("practice progress reuses the progress charts and stat tiles",
+      "loadPracticeStats" in app_js and "loadPracticeTrends" in app_js
+      and "practice-trend-volume-chart" in app_js
+      and "practice-overall-stats" in app_js, "practice pages have no renderers")
     ''',
 }

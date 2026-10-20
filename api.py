@@ -16,10 +16,10 @@ from api_questions import (
 from api_practice import (
     api_practice_start, api_practice_next, api_practice_attempt,
     api_practice_finish, api_list_practice_sessions, api_get_practice_session,
-    api_delete_practice_session,
+    api_delete_practice_session, api_practice_stats, api_practice_trends,
 )
 from api_issues import (
-    api_submit_website_issue, api_list_website_issues, api_resolve_website_issue,
+    api_submit_website_issue, api_list_website_issues, api_delete_website_issue,
 )
 from api_admin import (
     api_list_reports, api_resolve_report, api_stats, api_progress_trends,
@@ -59,7 +59,7 @@ ROUTES = [
     ("POST", r"^/api/questions/(?P<id>\d+)/report$", api_report_question, "csrf"),
     ("POST", r"^/api/website-issues$", api_submit_website_issue, "csrf"),
     ("GET", r"^/api/admin/website-issues$", api_list_website_issues, "admin"),
-    ("POST", r"^/api/admin/website-issues/(?P<id>\d+)/resolve$", api_resolve_website_issue, "admin"),
+    ("POST", r"^/api/admin/website-issues/(?P<id>\d+)/delete$", api_delete_website_issue, "admin"),
     ("POST", r"^/api/practice/start$", api_practice_start, "csrf"),
     ("GET", r"^/api/practice/next$", api_practice_next, "open"),
     ("POST", r"^/api/practice/attempts$", api_practice_attempt, "csrf"),
@@ -82,6 +82,8 @@ ROUTES = [
     ("GET", r"^/api/admin/practice-sessions$", api_list_practice_sessions, "admin"),
     ("GET", r"^/api/admin/practice-sessions/(?P<id>\d+)$", api_get_practice_session, "admin"),
     ("POST", r"^/api/admin/practice-sessions/(?P<id>\d+)/delete$", api_delete_practice_session, "admin"),
+    ("GET", r"^/api/admin/practice-stats$", api_practice_stats, "admin"),
+    ("GET", r"^/api/admin/practice-trends$", api_practice_trends, "admin"),
     ("GET", r"^/api/stats$", api_stats, "staff"),
     ("GET", r"^/api/admin/progress-trends$", api_progress_trends, "admin"),
 ]

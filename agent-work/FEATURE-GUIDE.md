@@ -37,9 +37,12 @@ Success and error messages use a shared banner inside the site header. The heade
 
 - Visitors enter a name and optionally choose a topic. No account is required.
 - Practice uses the same eligible question pool and weighting as the squadron quiz, but tracks questions faced within that practice run.
-- Correct, incorrect, and skipped practice answers are stored separately. They never change squadron progress.
+- Each practice question opens with its answer hidden. The initial choices are Show answer, Skip, and Finish practice. Revealing the answer swaps Show answer and Skip for Got it right and Got it wrong.
+- Correct, incorrect, and skipped practice answers are stored separately. They never change squadron progress or squadron weighting.
+- A practice run is closed and saved automatically when leaving the practice page or closing/reloading the app, so the Finish button is optional.
 - Practice runs can report a question. Visitors provide the name they practised under; signed-in staff are identified from their account.
-- Admins can inspect finished runs and delete an individual run.
+- Admins can inspect finished runs, grouped alphabetically by the practised name with the newest run first, and delete an individual run.
+- Admins also get **Overall practice data** and **Practice trends**, built from the practice answers only. The Progress menu splits these and the squadron pages into expandable **Squadron progress** and **Practice progress** groups.
 
 ### Question submission
 
@@ -86,7 +89,7 @@ The saved board state is the source for column placement. Lifecycle actions keep
 - The board title and subtitle sit side by side on desktop and stack on phones. The subtitle is left-aligned and wraps across multiple lines as needed. Status and error messages appear in the site header, which expands so they do not cover board elements.
 - On desktop, the board uses a fixed-height workspace below the header and alongside the rail. On phones, it returns to normal document scrolling below a sticky header, so the browser's changing viewport height and the on-screen keyboard do not trap the user in a clipped canvas.
 - The phone header menu button sits in the header row. The board header, topic filter, management forms and editor use a readable single-column flow, with larger text and touch targets. The status columns are separate swipeable pages; cards reveal actions only when tapped, and add/edit opens as an overlay card rather than below the columns.
-- Error and confirmation banners appear in the site header; the desktop board workspace begins below the full header height, while the phone board remains in normal page flow below its sticky header.
+- Error and confirmation banners appear in the site header; destructive and consequential actions use in-page confirmation dialogs rather than browser confirm boxes. The desktop board workspace begins below the full header height, while the phone board remains in normal page flow below its sticky header.
 
 ### Reports and keeping questions accurate
 
@@ -108,7 +111,8 @@ The saved board state is the source for column placement. Lifecycle actions keep
 
 - The Progress view shows squadron-wide totals and accuracy, then per-topic and per-question statistics.
 - Quiz sessions preserve the runner, time, topic filter, outcomes, and question/answer text as it appeared during that run. Admins can open and delete an individual session.
-- Practice results show each completed solo run and its question-level results, separately from squadron totals. Admins can open and delete an individual run.
+- Practice results show completed solo runs grouped by name, with question-level results kept separately from squadron totals. Admins can open and delete an individual run.
+- Overall practice data mirrors the squadron topic/question statistics using practice answers only. Practice trends mirror the 12-week squadron charts. Neither page changes the squadron scoreboard.
 - Admins can reset squadron answer progress without deleting the question bank or staff accounts. This is a destructive action and should remain clearly labelled and confirmed.
 - Archiving preserves question and answer history while removing the question from future quiz/practice pools. Restoring brings it back. Permanent deletion removes linked history and reports.
 
@@ -145,7 +149,7 @@ The saved board state is the source for column placement. Lifecycle actions keep
 | Question routes | `api_questions.py` — public submissions and question reports |
 | Practice routes | `api_practice.py` — individual practice sessions and answers |
 | Admin routes | `api_admin.py` — admin workflows, including progress trends |
-| Website issue reports | `api_issues.py` — public report submission and admin review |
+| Website issue reports | `api_issues.py` — public report submission and admin list/delete |
 | Quiz selection | `quiz.py` — eligibility pool, weights, and random question selection |
 | Batch import | `import_questions.py` — CSV/JSON command-line import |
 | Product overview and operations | `README.md` — setup, configuration, deployment and project notes |
@@ -162,12 +166,14 @@ Routes are registered in `api.py`; feature handlers live in the corresponding `a
 - Authentication: `/api/auth/*`
 - Quiz and squadron attempts: `/api/quiz/*`, `/api/attempts`
 - Practice: `/api/practice/*`
+- Admin practice reporting: `/api/admin/practice-sessions*`, `/api/admin/practice-stats`, `/api/admin/practice-trends`
 - Public question submission and reporting: `/api/questions`, `/api/questions/{id}/report`
 - Admin board and board state: `/api/admin/question-board`, `/api/admin/questions/{id}/board-state`
 - Admin question editing, approval, archive, reports, and import: `/api/admin/*`
 - Progress: `/api/stats`
 - Admin progress trends: `/api/admin/progress-trends` (admin-only)
-- Website issue reports: `POST /api/website-issues`; admin review at `/api/admin/website-issues*`
+- Admin practice trends: `/api/admin/practice-trends` (admin-only)
+- Website issue reports: `POST /api/website-issues`; admin list/delete at `/api/admin/website-issues*`
 - Topic list: `/api/topics`
 
 The exact request and response formats are defined in the route handlers. When changing behaviour, update the browser client, server validation/state transitions, and quiz eligibility together where relevant.
@@ -178,14 +184,14 @@ The following accepted improvements are implemented. The detailed implementation
 
 - **G3 — Admin progress charts:** Adds a separate admin-only **Progress trends** page under Progress. It displays weekly correct, incorrect, and skipped counts for the last 12 weeks, plus an accuracy trend that omits weeks with fewer than five scored answers. Skipped answers do not count toward accuracy.
 - **G4 — Request feedback:** Shared API requests give immediate in-flight feedback, prevent duplicate submissions while a request is pending, and restore the prior control state when it finishes.
-- **G5 — Keyboard and focus behaviour:** View changes move focus to the new heading; disclosure controls expose expanded state and support Escape; the mobile board editor manages focus, traps Tab within the open editor, and restores focus when closed.
+- **G5 — Keyboard and focus behaviour:** View changes do not select or focus the destination heading; disclosure controls expose expanded state and support Escape; the mobile board editor manages focus, traps Tab within the open editor, and restores focus when closed.
 - **B3 — Database migrations:** SQLite `user_version` tracks schema version 1. Migrations run transactionally, reject databases from a newer unsupported version, and log migration outcomes.
 - **B4 — Backend module split:** Startup, route registration, shared helpers, authentication/quiz, questions, practice, admin features, and HTTP transport now have separate modules.
 - **B7 — Hosting guidance:** The README documents HTTPS reverse proxy deployment, secure-cookie configuration, network exposure, backups/restores, health checks, and forwarded IP considerations.
 - **B8 — Test organization:** The existing end-to-end suite is divided into feature case modules and run in its original shared-data order by `test_quiz.py`.
 - **B9 — Runtime health and logs:** Startup and request failures use Python logging. `/healthz` checks database access and returns an unhealthy response when it fails; the container health check uses this endpoint.
-- **Website issue reports:** The menu title's three-dots button opens a form available to visitors and staff. Reports are stored separately from question reports, include the originating page and signed-in identity when available, and appear in an admin-only review page where they can be marked fixed or dismissed.
-- **Page switching:** Changing views closes transient dialogs and question menus, clears stale header banners, and explicitly hides the Progress trends navigation item while All questions is open.
+- **Website issue reports:** The menu title's three-dots button opens a menu with a **Report a website issue** option, available to visitors and staff. Reports are stored separately from question reports and include the originating page. The admin-only **Website issue reports** page shows every report in one list and offers a delete button for each report.
+- **Page switching:** Changing views closes transient dialogs and question menus and clears stale header banners. Admin navigation tabs remain visible on every view, while admin-only page sections stay hidden unless their own view is selected; identity and board refreshes cannot reveal Progress trends or Website issue reports alongside All questions.
 
 ## Working on the app
 

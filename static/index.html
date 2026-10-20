@@ -41,7 +41,13 @@
                 <circle cx="50" cy="50" r="20" fill="#c8102e"/>
             </svg>
             <span class="side-menu-title">RAFAC QUESTIONS<small>Squadron learning</small></span>
-            <button type="button" class="menu-issue-btn" id="menu-issue-btn" aria-label="Report a website issue" title="Report a website issue">&#8942;</button>
+            <div class="dots-wrap issue-menu-wrap">
+                <button type="button" class="menu-issue-btn" id="issue-menu-btn"
+                        aria-label="Website issue options" aria-controls="issue-menu" aria-expanded="false">&#8942;</button>
+                <div class="dots-menu" id="issue-menu" hidden>
+                    <button type="button" id="issue-report-btn">Report a website issue</button>
+                </div>
+            </div>
         </div>
         <nav class="main-nav" id="main-nav" hidden>
             <div class="nav-section">
@@ -52,15 +58,27 @@
             </div>
             <div class="nav-section admin-only" hidden>
                 <p class="nav-section-label">Progress</p>
-                <button type="button" class="nav-btn admin-only" data-view="stats" hidden>Squadron progress</button>
-                <button type="button" class="nav-btn admin-only" id="progress-trends-nav" data-view="progress-trends" hidden>Progress trends</button>
-                <button type="button" class="nav-btn admin-only" data-view="sessions" hidden>Quiz sessions</button>
-                <button type="button" class="nav-btn admin-only" data-view="practice-results" hidden>Practice results</button>
+                <details class="nav-group" id="squadron-progress-group">
+                    <summary class="nav-group-toggle">Squadron progress</summary>
+                    <div class="nav-submenu">
+                        <button type="button" class="nav-btn admin-only" data-view="stats" hidden>Squadron progress</button>
+                        <button type="button" class="nav-btn admin-only" id="progress-trends-nav" data-view="progress-trends" hidden>Progress trends</button>
+                        <button type="button" class="nav-btn admin-only" data-view="sessions" hidden>Quiz sessions</button>
+                    </div>
+                </details>
+                <details class="nav-group" id="practice-progress-group">
+                    <summary class="nav-group-toggle">Practice progress</summary>
+                    <div class="nav-submenu">
+                        <button type="button" class="nav-btn admin-only" data-view="practice-stats" hidden>Overall practice data</button>
+                        <button type="button" class="nav-btn admin-only" data-view="practice-trends" hidden>Practice trends</button>
+                        <button type="button" class="nav-btn admin-only" data-view="practice-results" hidden>Practice results</button>
+                    </div>
+                </details>
             </div>
             <div class="nav-section admin-only" hidden>
                 <p class="nav-section-label">Admin</p>
                 <button type="button" class="nav-btn admin-only" id="question-review-toggle" data-view="board" hidden aria-controls="view-board">All questions <span id="review-badge" class="badge" hidden>0</span></button>
-                <button type="button" class="nav-btn admin-only" data-view="website-issues" hidden>Website issue reports</button>
+                <button type="button" class="nav-btn admin-only" id="website-issues-nav" data-view="website-issues" hidden>Website issue reports</button>
                 <button type="button" class="nav-btn admin-only" data-view="users" hidden>Staff/NCO accounts</button>
             </div>
         </nav>
@@ -186,10 +204,10 @@
                     </div>
                 </div>
                 <div class="controls">
-                    <button type="button" class="success" id="practice-correct-btn">Got it right</button>
-                    <button type="button" class="danger" id="practice-incorrect-btn">Got it wrong</button>
-                    <button type="button" class="warn" id="practice-skip-btn">Skip</button>
+                    <button type="button" class="success" id="practice-correct-btn" hidden>Got it right</button>
+                    <button type="button" class="danger" id="practice-incorrect-btn" hidden>Got it wrong</button>
                     <button type="button" class="secondary" id="practice-reveal-btn">Show answer</button>
+                    <button type="button" class="warn" id="practice-skip-btn">Skip</button>
                     <button type="button" class="primary" id="practice-finish-btn">Finish practice</button>
                 </div>
             </div>
@@ -263,6 +281,32 @@
             </section>
         </section>
 
+        <section class="view admin-only" id="view-practice-stats" hidden>
+            <h2>Overall practice data</h2>
+            <h3 class="section-label">Practice overall</h3>
+            <div class="stat-row" id="practice-overall-stats"></div>
+            <h3 class="section-label">By topic</h3>
+            <p class="hint text-box">Solo practice results are kept separate from the squadron scoreboard. Open a topic to see each individual question.</p>
+            <div class="accordion" id="practice-stats-topics"></div>
+            <p class="muted text-box" id="practice-stats-empty" hidden>No practice answers have been recorded yet.</p>
+        </section>
+
+        <section class="view admin-only" id="view-practice-trends" hidden>
+            <h2>Practice trends</h2>
+            <p class="hint text-box">Solo practice results by week for the last 12 weeks, kept apart from the squadron scoreboard. Accuracy excludes skipped questions.</p>
+            <p class="muted text-box" id="practice-trends-empty" hidden>No practice answers have been recorded in this period.</p>
+            <section class="trend-card card" aria-labelledby="practice-trend-volume-title">
+                <h3 id="practice-trend-volume-title">Answers recorded each week</h3>
+                <p class="muted">Correct, incorrect, and skipped answers.</p>
+                <div id="practice-trend-volume-chart"></div>
+            </section>
+            <section class="trend-card card" aria-labelledby="practice-trend-accuracy-title">
+                <h3 id="practice-trend-accuracy-title">Weekly accuracy</h3>
+                <p class="muted">Weeks with fewer than 5 scored answers are omitted to avoid over-reading small samples.</p>
+                <div id="practice-trend-accuracy-chart"></div>
+            </section>
+        </section>
+
         <section class="view" id="view-review" hidden>
             <h2>Review submitted questions</h2>
             <p class="hint text-box" id="review-summary"></p>
@@ -279,7 +323,7 @@
 
         <section class="view" id="view-practice-results" hidden>
             <h2>Practice results</h2>
-            <p class="hint text-box">Solo practice runs, kept apart from the squadron scoreboard. Open a run to see who practised and every question, answer and result.</p>
+            <p class="hint text-box">Solo practice runs, kept apart from the squadron scoreboard. Runs are grouped by practised name, alphabetically, with the newest first. Open a run to see every question, answer and result.</p>
             <div class="accordion" id="practice-results-list"></div>
             <p class="muted text-box" id="practice-results-empty" hidden>No finished practice runs yet.</p>
         </section>
@@ -437,8 +481,6 @@
             <h2>Report a website issue</h2>
             <p class="hint text-box">Tell the admin team what went wrong or what could work better.</p>
             <form class="card form" id="website-issue-form">
-                <label for="website-issue-name">Your name (optional)</label>
-                <input type="text" id="website-issue-name" maxlength="80" autocomplete="name">
                 <label for="website-issue-title">Short title</label>
                 <input type="text" id="website-issue-title" maxlength="120" required>
                 <label for="website-issue-details">What happened?</label>
@@ -449,11 +491,7 @@
 
         <section class="view admin-only" id="view-website-issues" hidden>
             <h2>Website issue reports</h2>
-            <p class="hint text-box">Reports submitted from the menu. Mark an issue fixed or dismiss it after review.</p>
-            <div class="controls">
-                <button type="button" id="website-issues-pending" class="secondary">Open reports</button>
-                <button type="button" id="website-issues-resolved" class="secondary">Handled reports</button>
-            </div>
+            <p class="hint text-box">Reports submitted from the menu. Delete a report once it has been dealt with.</p>
             <ul class="question-list" id="website-issues-list"></ul>
             <p class="muted text-box" id="website-issues-empty" hidden>No website issue reports here.</p>
         </section>

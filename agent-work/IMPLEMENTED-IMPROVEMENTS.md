@@ -16,9 +16,19 @@ The browser view and chart rendering are in `static/index.html`, `static/app.js`
 
 ### G5 — Keyboard and focus support
 
-**Status: implemented.** Changing views moves keyboard focus to the destination view heading. Navigation popovers use disclosure-button semantics with `aria-controls` and `aria-expanded`, rather than menu roles without the keyboard model those roles require. Escape closes a popover and returns focus to its trigger.
+**Status: implemented.** Changing views no longer selects or focuses the destination view heading. Navigation popovers use disclosure-button semantics with `aria-controls` and `aria-expanded`, rather than menu roles without the keyboard model those roles require. Escape closes a popover and returns focus to its trigger.
 
 On mobile, opening the board editor focuses the question field and makes the background header/navigation inert. Tab and Shift+Tab stay within the editor, Escape cancels it, and closing restores focus to the control that opened it.
+
+### In-page confirmation dialogs
+
+**Status: implemented.** Consequential actions use a reusable in-page confirmation dialog instead of browser `confirm` boxes. This covers question deletion, archive and approval moves, discarding editor changes, resetting progress, deleting quiz sessions and practice runs, and deleting website issue reports. The dialog supports a title, explanatory message, confirm label, destructive or primary styling, Escape and Cancel handling.
+
+### Practice answer reveal
+
+**Status: implemented.** Each practice question starts with its answer hidden. The initial actions are Show answer, Skip and Finish practice. Revealing the answer replaces Show answer and Skip with Got it right and Got it wrong, so the self-assessment is recorded only after the answer has been seen. The revealed state is reset for every new question.
+
+Practice draws from the same squadron-weighted pool as the main quiz. Practice answers remain in the separate practice tables, so they never alter squadron progress, question weights, or any data outside the existing individual practice scores and results.
 
 ## Backend improvements
 
@@ -57,12 +67,20 @@ The Docker image includes the split modules. `db.py` remains the owner of schema
 
 ### Website issue reporting
 
-**Status: implemented.** A three-dots button beside the menu title opens a website issue form for visitors and signed-in staff. Reports store a title, details, originating page, optional reporter name, and status in a separate SQLite table. The admin-only **Website issue reports** page lists open and handled reports and lets admins mark an issue fixed or dismiss it. The database migration advances the schema to version 2.
+**Status: implemented.** A three-dots button beside the menu title opens a menu with a **Report a website issue** option, which opens the report form for visitors and signed-in staff. The form asks only for a title and details, and records the originating page. The admin-only **Website issue reports** page shows all reports in one list with a delete button for each report. The database migration advances the schema to version 2.
 
 ### Page switching cleanup
 
-**Status: implemented.** Switching views clears shared status banners, closes question menus and open dialogs, and explicitly hides the Progress trends link while the All questions board is active. This prevents transient interface elements from carrying over between pages.
+**Status: implemented.** Switching views clears shared status banners and closes question menus and open dialogs. Admin navigation tabs remain visible on every view. Identity and board refreshes only reveal admin-only controls, not admin-only page sections, so the Progress trends and Website issue reports pages cannot appear alongside All questions.
+
+### Practice auto-save and reporting
+
+**Status: implemented.** Leaving the practice view, or closing/reloading the page, closes the active practice run and saves it. In-app navigation posts the finish request and refreshes Practice results when that page is open; page unload uses a keepalive request so the score is not lost. Empty runs are still discarded by the existing finish rule.
+
+Practice results are grouped by the practised name. Names sort alphabetically, and runs within a name sort newest first by their saved date and time. Each run keeps its existing open/delete controls.
+
+Admin practice reporting now mirrors the squadron reporting pages. **Overall practice data** shows practice-only totals, per-topic statistics, and per-question accuracy. **Practice trends** shows the same 12-week volume and accuracy charts using practice answers only. The Progress navigation is split into expandable **Squadron progress** and **Practice progress** groups.
 
 ## Verification status
 
-The changes above are implemented and were checked with the repository's end-to-end suite on 20 October 2026. The runner completed all 410 checks with no failures, including the new website issue API workflow, schema migration, page-switching cleanup, and Progress trends access checks. The suite starts its own server and temporary database on port 8099. Interface assertions from the retired bank/review navigation were updated to match the current question-board design, and the suite now compiles and runs every registered case.
+The changes above are implemented and were checked with the repository's end-to-end suite on 20 October 2026. The runner completed all 438 checks with no failures, including the website issue API workflow, schema migration, page-switching cleanup, menu-based issue reporting, report deletion, in-page confirmations, the practice reveal flow, practice auto-save and grouped results, practice overall/trend reporting, and Progress trends access checks. The suite starts its own server and temporary database on port 8099. Interface assertions from the retired bank/review navigation were updated to match the current question-board design, and the suite now compiles and runs every registered case.
