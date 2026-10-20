@@ -71,6 +71,10 @@ The Docker image includes the split modules. `db.py` remains the owner of schema
 
 **Status: implemented.** Python logging reports application startup, migration outcomes, request exceptions, HTTP errors, and startup failures. The `/healthz` endpoint performs a simple database query and returns HTTP 503 if database access fails. The Docker health check uses `/healthz`.
 
+### HTTP keep-alive request-body handling
+
+**Status: implemented.** `webserver.QuizHandler` now drains any request body a handler did not read before the connection is reused (`consume_body`, called from `dispatch`'s `finally`), and closes the connection when the body is invalid or oversized instead of leaving it unread. Responses such as 401/403/404/405 are sent before the body is parsed, so on an HTTP/1.1 keep-alive connection the unread bytes were previously mistaken for the next request line. This caused the reported failure where logging out appeared to leave the server unresponsive: the `pagehide` finish request is rejected after the session cookie is cleared, and its unread body corrupted the connection reused for the reloaded page. A new end-to-end case sends a rejected keep-alive POST followed by a request on the same socket and checks that the second request is understood.
+
 ### Website issue reporting
 
 **Status: implemented.** A three-dots button beside the menu title opens a menu with a **Report a website issue** option, which opens the report form for visitors and signed-in staff. The form asks only for a title and details, and records the originating page. The admin-only **Website issue reports** page shows all reports in one list with a delete button for each report. The database migration advances the schema to version 2.
@@ -87,6 +91,10 @@ Practice results are grouped by the practised name. Names sort alphabetically, a
 
 Admin practice reporting now mirrors the squadron reporting pages. **Overall practice data** shows practice-only totals, per-topic statistics, and per-question accuracy. **Practice trends** shows the same 12-week volume and accuracy charts using practice answers only. The Progress navigation is split into expandable **Squadron progress** and **Practice progress** groups.
 
+### Agent documentation structure
+
+**Status: implemented.** The agent notes are grouped under `agent-work/` by purpose — `product/`, `ui/`, and `engineering/` — with an index in `agent-work/README.md` and a root `AGENTS.md` entry point. The code map, API map, and change guidance moved out of the product guide into `engineering/ARCHITECTURE.md` so each note has one job. Documentation links were updated to the new paths.
+
 ## Verification status
 
-The changes above are implemented and were checked with the repository's end-to-end suite on 20 October 2026. The runner completed all 450 checks with no failures, including the website issue API workflow, schema migration, page-switching cleanup, menu-based issue reporting, report deletion, in-page confirmations, the practice reveal flow, practice auto-save and grouped results, practice overall/trend reporting, Progress trends access checks, and question-board editor drag/save behaviour. The suite starts its own server and temporary database on port 8099. Interface assertions from the retired bank/review navigation were updated to match the current question-board design, and the suite now compiles and runs every registered case.
+The changes above are implemented and were checked with the repository's end-to-end suite on 20 October 2026. The runner completed all 452 checks with no failures, including the website issue API workflow, schema migration, page-switching cleanup, menu-based issue reporting, report deletion, in-page confirmations, the practice reveal flow, practice auto-save and grouped results, practice overall/trend reporting, Progress trends access checks, question-board editor drag/save behaviour, and keep-alive handling after a rejected POST. The suite starts its own server and temporary database on port 8099. Interface assertions from the retired bank/review navigation were updated to match the current question-board design, and the suite now compiles and runs every registered case.

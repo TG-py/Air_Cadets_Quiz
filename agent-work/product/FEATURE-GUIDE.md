@@ -1,8 +1,15 @@
 # Web app feature guide for agents
 
-This document describes the current RAFAC Questions web app so agents can work on features without having to reconstruct the product from individual screens. It covers user roles, the main workflows, important behaviour, and where each part lives in the code.
+This document describes the current RAFAC Questions web app so agents can work on features without having to reconstruct the product from individual screens. It covers user roles, the main workflows, and the behaviour that must not regress.
 
-For visual work, also follow [`UI-DESIGN-RULES.md`](UI-DESIGN-RULES.md). The running interface and current code are authoritative when older documentation or retained markup describes a previous layout.
+Related notes:
+
+- [`../engineering/ARCHITECTURE.md`](../engineering/ARCHITECTURE.md) — module map, request lifecycle, data model, route/access model, conventions, and how to make common changes.
+- [`../ui/UI-DESIGN-RULES.md`](../ui/UI-DESIGN-RULES.md) — visual language and accessibility for interface work.
+- [`../ui/MOBILE-RESPONSIVE-DIFFERENCES.md`](../ui/MOBILE-RESPONSIVE-DIFFERENCES.md) — desktop versus phone layout and interaction differences.
+- [`../engineering/IMPLEMENTED-IMPROVEMENTS.md`](../engineering/IMPLEMENTED-IMPROVEMENTS.md) — history of accepted changes and verification status.
+
+The running interface and current code are authoritative when older documentation or retained markup describes a previous layout.
 
 ## What the app does
 
@@ -133,72 +140,6 @@ The saved board state is the source for column placement. Lifecycle actions keep
 - Question and answer content is user-provided. Continue using bound SQL parameters and safe text rendering; do not interpolate it as HTML or SQL.
 - Make state-changing actions understandable and recoverable where possible. Archive is reversible; permanent delete and progress reset are not.
 
-## Code map
+## Where the code lives
 
-| Area | Files and responsibilities |
-| --- | --- |
-| Browser page and navigation | `static/index.html` — views, forms, navigation and accessible labels |
-| Browser behaviour | `static/app.js` — view switching, API calls, rendering, quiz/practice flows, board interactions |
-| Visual styling | `static/style.css` — app shell, responsive layouts, question cards and board states |
-| Application startup | `app.py` — startup and initial admin account |
-| Database | `db.py` — SQLite schema, migrations, queries, and persistence for questions, reports, attempts, sessions and users |
-| HTTP transport and static files | `webserver.py` — HTTP request handling, static file responses, security headers, and health endpoint |
-| Route registration | `api.py` — maps URL patterns and access requirements to feature handlers |
-| Shared API helpers | `api_common.py` — request context, validation, and consistent API errors |
-| Authentication and squad quiz routes | `api_auth.py` — sign-in and squad quiz workflows |
-| Question routes | `api_questions.py` — public submissions and question reports |
-| Practice routes | `api_practice.py` — individual practice sessions and answers |
-| Admin routes | `api_admin.py` — admin workflows, including progress trends |
-| Website issue reports | `api_issues.py` — public report submission and admin list/delete |
-| Quiz selection | `quiz.py` — eligibility pool, weights, and random question selection |
-| Batch import | `import_questions.py` — CSV/JSON command-line import |
-| Product overview and operations | `README.md` — setup, configuration, deployment and project notes |
-| Agent feature guide | `agent-work/FEATURE-GUIDE.md` — roles, workflows, behaviour and code map |
-| UI guidance | `agent-work/UI-DESIGN-RULES.md` — visual language and accessibility guidance |
-| Responsive layout notes | `agent-work/MOBILE-RESPONSIVE-DIFFERENCES.md` — desktop and phone layout/interaction differences |
-
-The HTML still contains some legacy review sections and the JavaScript still contains supporting handlers for existing admin routes. They are not current navigation destinations: use the question board as the admin question-management interface unless a deliberate product change says otherwise.
-
-## Feature API map
-
-Routes are registered in `api.py`; feature handlers live in the corresponding `api_*.py` module. The route's access label determines whether it is public, staff-only, admin-only, or CSRF-protected. The browser client calls these routes from `static/app.js`.
-
-- Authentication: `/api/auth/*`
-- Quiz and squadron attempts: `/api/quiz/*`, `/api/attempts`
-- Practice: `/api/practice/*`
-- Admin practice reporting: `/api/admin/practice-sessions*`, `/api/admin/practice-stats`, `/api/admin/practice-trends`
-- Public question submission and reporting: `/api/questions`, `/api/questions/{id}/report`
-- Admin board and board state: `/api/admin/question-board`, `/api/admin/questions/{id}/board-state`
-- Admin question editing, approval, archive, reports, and import: `/api/admin/*`
-- Progress: `/api/stats`
-- Admin progress trends: `/api/admin/progress-trends` (admin-only)
-- Admin practice trends: `/api/admin/practice-trends` (admin-only)
-- Website issue reports: `POST /api/website-issues`; admin list/delete at `/api/admin/website-issues*`
-- Topic list: `/api/topics`
-
-The exact request and response formats are defined in the route handlers. When changing behaviour, update the browser client, server validation/state transitions, and quiz eligibility together where relevant.
-
-## Recently implemented improvements
-
-The following accepted improvements are implemented. The detailed implementation record, including scope and verification status, is in [`IMPLEMENTED-IMPROVEMENTS.md`](IMPLEMENTED-IMPROVEMENTS.md).
-
-- **G3 — Admin progress charts:** Adds a separate admin-only **Progress trends** page under Progress. It displays weekly correct, incorrect, and skipped counts for the last 12 weeks, plus an accuracy trend that omits weeks with fewer than five scored answers. Skipped answers do not count toward accuracy.
-- **G4 — Request feedback:** Shared API requests give immediate in-flight feedback, prevent duplicate submissions while a request is pending, and restore the prior control state when it finishes.
-- **G5 — Keyboard and focus behaviour:** View changes do not select or focus the destination heading; disclosure controls expose expanded state and support Escape; the mobile board editor manages focus, traps Tab within the open editor, and restores focus when closed.
-- **B3 — Database migrations:** SQLite `user_version` tracks schema version 1. Migrations run transactionally, reject databases from a newer unsupported version, and log migration outcomes.
-- **B4 — Backend module split:** Startup, route registration, shared helpers, authentication/quiz, questions, practice, admin features, and HTTP transport now have separate modules.
-- **B7 — Hosting guidance:** The README documents HTTPS reverse proxy deployment, secure-cookie configuration, network exposure, backups/restores, health checks, and forwarded IP considerations.
-- **B8 — Test organization:** The existing end-to-end suite is divided into feature case modules and run in its original shared-data order by `test_quiz.py`.
-- **B9 — Runtime health and logs:** Startup and request failures use Python logging. `/healthz` checks database access and returns an unhealthy response when it fails; the container health check uses this endpoint.
-- **Website issue reports:** The menu title's three-dots button opens a menu with a **Report a website issue** option, available to visitors and staff. Reports are stored separately from question reports and include the originating page. The admin-only **Website issue reports** page shows every report in one list and offers a delete button for each report.
-- **Page switching:** Changing views closes transient dialogs and question menus and clears stale header banners. Admin navigation tabs remain visible on every view, while admin-only page sections stay hidden unless their own view is selected; identity and board refreshes cannot reveal Progress trends or Website issue reports alongside All questions.
-
-## Working on the app
-
-- Start by checking `agent-work/FEATURE-GUIDE.md`, `README.md`, and `agent-work/UI-DESIGN-RULES.md`, then inspect the relevant implementation before changing it.
-- Preserve the role boundaries and product rules above when adding screens or API routes.
-- Keep question-state logic consistent between the board's derived state, server transitions, and `quiz.build_pool`.
-- Treat `db.py` as the owner of persistence and migrations; avoid duplicating SQL rules across features when a database helper exists.
-- Keep the board as the primary admin surface for question maintenance unless the product direction is explicitly changed.
-- The README and older hidden views may retain names from earlier layouts. Confirm current navigation and behaviour in `static/index.html` and `static/app.js` before relying on old labels.
-- The repository includes `test_quiz.py` as its end-to-end test suite. Run verification only when requested or required by the task instructions.
+The module map, request lifecycle, data model, route/access model, and the steps for common changes are in [`../engineering/ARCHITECTURE.md`](../engineering/ARCHITECTURE.md). The HTML still contains some legacy review sections and the JavaScript still contains supporting handlers for existing admin routes. They are not current navigation destinations: use the question board as the admin question-management interface unless a deliberate product change says otherwise.

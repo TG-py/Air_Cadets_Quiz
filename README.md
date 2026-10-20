@@ -109,8 +109,8 @@ ADMIN_PASSWORD='something-long' python3 app.py
 The database ships empty, so load your existing list. Anything already in the
 bank is skipped, so it is safe to re-run.
 
-**In the browser** - log in as admin, open *Question bank*, paste your list
-into the import box and choose CSV or JSON.
+**In the browser** - log in as admin, open the question board's **Import CSV**
+control, and choose a `.csv` file or paste CSV text.
 
 **From the command line:**
 
@@ -306,7 +306,7 @@ docker compose exec air-cadets-quiz \
   python import_questions.py -i questions.csv
 ```
 
-or just paste the file into the admin page's **Question bank** tab.
+or use **Import CSV** on the admin question board.
 
 ### Without compose
 
@@ -351,7 +351,22 @@ docker logs air-cadets-quiz
 | `import_questions.py` | Command line importer |
 | `test_quiz.py`, `tests/` | End-to-end test runner and cases grouped by feature |
 | `static/` | Page, styles and browser code |
+| `agent-work/` | Product, UI, and engineering notes for contributors and AI agents |
+| `AGENTS.md` | Orientation and working rules for AI agents |
 | `questions.db` | Created on first run |
+
+## Documentation
+
+- [`AGENTS.md`](AGENTS.md) - entry point for AI agents: commands, layout, and
+  non-negotiable conventions.
+- [`agent-work/README.md`](agent-work/README.md) - index of the agent notes.
+- [`agent-work/product/FEATURE-GUIDE.md`](agent-work/product/FEATURE-GUIDE.md) -
+  roles, workflows, and product rules.
+- [`agent-work/engineering/ARCHITECTURE.md`](agent-work/engineering/ARCHITECTURE.md) -
+  modules, request lifecycle, data model, and how to extend the app.
+- [`agent-work/ui/UI-DESIGN-RULES.md`](agent-work/ui/UI-DESIGN-RULES.md) and
+  [`agent-work/ui/MOBILE-RESPONSIVE-DIFFERENCES.md`](agent-work/ui/MOBILE-RESPONSIVE-DIFFERENCES.md) -
+  visual and responsive guidance.
 
 ## Tests
 
