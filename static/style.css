@@ -375,6 +375,7 @@ body.answered-incorrect #question-text { padding-left: .85rem; border-left: 4px 
 .board-card-mobile-actions { display: none; }
 .board-column-add, .board-swipe-hint { display: none; }
 .board-question-card:active { cursor: grabbing; }
+.board-question-card textarea, .board-question-card input, .board-question-card select, .board-question-card button { -webkit-user-drag: none; }
 .board-question-card.dragging { opacity: .45; }
 .board-card-topic { display: block; overflow: hidden; color: var(--muted); font: .58rem "DM Mono", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .board-card-question { margin: .2rem 0; color: var(--ink); font-size: .7rem; line-height: 1.3; overflow-wrap: anywhere; }

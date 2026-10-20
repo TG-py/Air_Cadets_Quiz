@@ -111,8 +111,9 @@ dom_script = r"""
 const fs = require("fs");
 const src = fs.readFileSync(process.argv[2], "utf8");
 function grab(name) {
-    const start = src.indexOf("function " + name + "(");
+    let start = src.indexOf("function " + name + "(");
     if (start < 0) { throw new Error("missing " + name); }
+    if (start >= 6 && src.slice(start - 6, start) === "async ") start -= 6;
     let p = src.indexOf("(", start), pd = 0;
     for (let i = p; i < src.length; i++) {
         if (src[i] === "(") { pd++; }
@@ -288,5 +289,149 @@ deleted = [issue for issue in payload.get("issues", []) if issue["id"] == issue_
 check("a deleted website issue leaves the list", status == 200 and not deleted, str(payload)[:200])
 status, payload, _ = admin.post("/api/admin/website-issues/%d/delete" % issue_id)
 check("a deleted website issue cannot be deleted twice", status == 404, str(status))
+    ''',
+    45: r'''
+print("\n[42] board editor saves without stealing text selection")
+app_js = open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8").read()
+css = open(os.path.join(ROOT, "static", "style.css"), encoding="utf-8").read()
+open_editor = app_js.split("function openBoardEditor(")[1].split("\nfunction cancelBoardEditor(")[0]
+check("editor text controls do not start a card drag",
+      "pointerdown" in open_editor
+      and 'closest("textarea, input, select, button, a, label")' in open_editor
+      and "source.draggable = canDragCard && !inEditorControl" in open_editor,
+      "dragging a text selection can still move the card")
+check("card dragging returns after the text selection ends",
+      "restoreCardDrag" in open_editor
+      and 'window.addEventListener("pointerup", restoreCardDrag)' in open_editor
+      and 'window.addEventListener("pointercancel", restoreCardDrag)' in open_editor,
+      "the editor card would stay undraggable")
+check("editor fields opt out of native dragging",
+      open_editor.count("control.draggable = false") >= 2
+      and "-webkit-user-drag: none" in css,
+      "form controls can still begin a native drag")
+check("saving refreshes the board before removing the editor",
+      app_js.count("loadQuestionBoard({ preserveEditor: true })") >= 2
+      and app_js.count("closeBoardEditor({ restoreCard: false })") >= 2,
+      "a failed refresh can discard the editor")
+check("closing the editor only restores a card when asked",
+      "function closeBoardEditor({ restoreCard = true } = {})" in app_js
+      and "if (restoreCard && editor.originalHost)" in app_js,
+      "the stale editor card would be reinserted after a save")
+board_script = r"""
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[2], "utf8");
+function grab(name) {
+    let start = src.indexOf("function " + name + "(");
+    if (start < 0) { throw new Error("missing " + name); }
+    if (start >= 6 && src.slice(start - 6, start) === "async ") start -= 6;
+    let p = src.indexOf("(", start), pd = 0;
+    for (let i = p; i < src.length; i++) {
+        if (src[i] === "(") { pd++; }
+        else if (src[i] === ")") { pd--; if (pd === 0) { p = i; break; } }
+    }
+    let depth = 0;
+    for (let i = src.indexOf("{", p); i < src.length; i++) {
+        if (src[i] === "{") { depth++; }
+        else if (src[i] === "}") { depth--; if (depth === 0) return src.slice(start, i + 1); }
+    }
+    throw new Error("unbalanced " + name);
+}
+const calls = [];
+const state = {
+    boardEditor: {
+        question: {
+            id: 7, question_text: "Old question", answer_text: "Old answer",
+            topic: "Old topic", status: "approved", board_state: "active",
+            ai_pending: false,
+        },
+        originalState: "active",
+        isNew: false,
+    },
+};
+const values = {
+    "board-edit-question": "New question",
+    "board-edit-answer": "New answer",
+    "board-edit-topic": "New topic",
+};
+function el(id) { return { value: values[id] || "" }; }
+let failEdit = false;
+async function api(path, options) {
+    calls.push(["api", path, options.body]);
+    if (path.endsWith("/edit")) {
+        if (failEdit) throw new Error("Could not save");
+        return { ok: true };
+    }
+    return { state: options.body.state, counts: {} };
+}
+function applyIdentity() {}
+function closeBoardEditor(options) { calls.push(["close", options]); }
+async function loadQuestionBoard(options) { calls.push(["load", options]); }
+function showError(message) { calls.push(["error", message]); }
+function showOk(message) { calls.push(["ok", message]); }
+async function confirmAction() { return true; }
+const BOARD_COLUMNS = [
+    { id: "active", label: "Active" },
+    { id: "time-sensitive", label: "Active time sensitive" },
+    { id: "reported", label: "Reported" },
+    { id: "approval", label: "Approval" },
+    { id: "archive", label: "Archive" },
+];
+eval(grab("saveBoardEditorAndMove"));
+(async () => {
+    await saveBoardEditorAndMove("archive");
+    const success = calls.slice();
+    calls.length = 0;
+    failEdit = true;
+    state.boardEditor = {
+        question: {
+            id: 7, question_text: "Old question", answer_text: "Old answer",
+            topic: "Old topic", status: "approved", board_state: "active",
+            ai_pending: false,
+        },
+        originalState: "active",
+        isNew: false,
+    };
+    await saveBoardEditorAndMove("archive");
+    console.log(JSON.stringify({ success, failure: calls }));
+})();
+"""
+board_path = os.path.join(ROOT, "static", "_board_save_check.js")
+with open(board_path, "w", encoding="utf-8") as handle:
+    handle.write(board_script)
+try:
+    board_out = subprocess.run(
+        ["node", board_path, os.path.join(ROOT, "static", "app.js")],
+        capture_output=True, text=True, timeout=60,
+    ).stdout.strip()
+except (OSError, subprocess.SubprocessError):
+    board_out = ""
+finally:
+    if os.path.exists(board_path):
+        os.remove(board_path)
+try:
+    board_data = json.loads(board_out.splitlines()[-1]) if board_out else {}
+except (ValueError, IndexError):
+    board_data = {}
+board_calls = board_data.get("success", [])
+board_failure = board_data.get("failure", [])
+check("editing and moving saves the fields and the destination",
+      len(board_calls) >= 4
+      and board_calls[0][:2] == ["api", "/api/admin/questions/7/edit"]
+      and board_calls[0][2]["question_text"] == "New question"
+      and board_calls[1][:2] == ["api", "/api/admin/questions/7/board-state"]
+      and board_calls[1][2]["state"] == "archive",
+      board_out[:300])
+check("the board refresh finishes before the editor closes",
+      len(board_calls) >= 5
+      and board_calls[2] == ["load", {"preserveEditor": True}]
+      and board_calls[3] == ["close", {"restoreCard": False}],
+      board_out[:300])
+check("a failed save leaves the editor open for a retry",
+      board_failure[:1] == [["api", "/api/admin/questions/7/edit",
+                             {"question_text": "New question", "answer_text": "New answer",
+                              "topic": "New topic"}]]
+      and any(call[0] == "error" for call in board_failure)
+      and not any(call[0] in ("load", "close") for call in board_failure),
+      board_out[:300])
     ''',
 }

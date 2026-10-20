@@ -1866,9 +1866,24 @@ function openBoardEditor(question, card, options = {}) {
     el("board-editor-card-slot").appendChild(source);
 
     source.classList.add("board-question-card-expanded");
-    source.draggable = !window.matchMedia("(max-width: 680px)").matches;
+    const canDragCard = !window.matchMedia("(max-width: 680px)").matches;
+    source.draggable = canDragCard;
     source.tabIndex = 0;
-    source.setAttribute("aria-label", "Expanded question editor. Drag anywhere on this card to save and move it. Use left and right arrows, then Enter, to choose a destination.");
+    source.setAttribute("aria-label", "Expanded question editor. Drag the card outside its text fields to save and move it. Use left and right arrows, then Enter, to choose a destination.");
+    source.addEventListener("pointerdown", (event) => {
+        const inEditorControl = event.target instanceof Element &&
+            Boolean(event.target.closest("textarea, input, select, button, a, label"));
+        source.draggable = canDragCard && !inEditorControl;
+        if (inEditorControl) {
+            const restoreCardDrag = () => {
+                source.draggable = canDragCard;
+                window.removeEventListener("pointerup", restoreCardDrag);
+                window.removeEventListener("pointercancel", restoreCardDrag);
+            };
+            window.addEventListener("pointerup", restoreCardDrag);
+            window.addEventListener("pointercancel", restoreCardDrag);
+        }
+    });
     source.replaceChildren();
     const header = document.createElement("header");
     header.className = "board-editor-card-header";
@@ -1919,6 +1934,9 @@ function openBoardEditor(question, card, options = {}) {
     topicSelect.value = question.topic || availableTopics[0] || "";
     topicSelect.required = true;
     fields.append(questionLabel, questionInput, answerLabel, answerInput, topicLabel, topicSelect);
+    [questionInput, answerInput, topicSelect].forEach((control) => {
+        control.draggable = false;
+    });
 
     const details = document.createElement("div");
     details.className = "board-editor-details";
@@ -1951,6 +1969,9 @@ function openBoardEditor(question, card, options = {}) {
     });
     mobileDestination.value = options.isNew ? initialState : question.board_state;
     fields.append(mobileDestinationLabel, mobileDestination, mobileSave);
+    [mobileDestination, mobileSave, cancelButton].forEach((control) => {
+        control.draggable = false;
+    });
     details.append(reports, suggestion);
     source.append(header, fields, details);
     setBoardEditorState(question, source);
@@ -1996,10 +2017,10 @@ async function cancelBoardEditor() {
     closeBoardEditor();
 }
 
-function closeBoardEditor() {
+function closeBoardEditor({ restoreCard = true } = {}) {
     if (!state.boardEditor) return;
     const editor = state.boardEditor;
-    if (editor.originalHost) {
+    if (restoreCard && editor.originalHost) {
         const cleanCard = questionBoardCard(editor.question);
         editor.card.replaceWith(cleanCard);
         editor.originalHost.appendChild(cleanCard);
@@ -2022,9 +2043,10 @@ function closeBoardEditor() {
     el("board-topic").disabled = false;
     document.querySelector("#view-board .board-tools").inert = false;
     setBoardEditorControlsDisabled(false);
-    const returnTarget = editor.originalHost
-        ? editor.originalHost.querySelector('.board-question-card[data-question-id="' + editor.question.id + '"]')
-        : document.querySelector('.question-board-column[data-board-state="' + editor.originalState + '"] .board-column-add');
+    const savedCard = document.querySelector('#question-board .board-question-card[data-question-id="' + editor.question.id + '"]');
+    const returnTarget = savedCard || (editor.originalHost
+        ? editor.originalHost.querySelector('.board-column-add')
+        : document.querySelector('.question-board-column[data-board-state="' + editor.originalState + '"] .board-column-add'));
     (returnTarget || editor.returnFocus)?.focus({ preventScroll: true });
 }
 
@@ -2047,8 +2069,8 @@ function openNewBoardEditor(initialState = "active") {
     openBoardEditor(question, card, { isNew: true, initialState });
 }
 
-async function loadQuestionBoard() {
-    if (state.boardEditor) closeBoardEditor();
+async function loadQuestionBoard({ preserveEditor = false } = {}) {
+    if (state.boardEditor && !preserveEditor) closeBoardEditor();
     const params = new URLSearchParams();
     const topic = el("board-topic").value;
     if (topic) params.set("topic", topic);
@@ -2155,9 +2177,9 @@ async function saveBoardEditorAndMove(targetState) {
                 question.board_state = moved.state;
                 applyIdentity(moved);
             }
-            closeBoardEditor();
+            await loadQuestionBoard({ preserveEditor: true });
+            closeBoardEditor({ restoreCard: false });
             showOk("New question added to " + (BOARD_COLUMNS.find((column) => column.id === targetState)?.label || "the board") + ".");
-            await loadQuestionBoard();
         } catch (err) { showError(err.message); }
         return;
     }
@@ -2189,11 +2211,11 @@ async function saveBoardEditorAndMove(targetState) {
             });
             applyIdentity(payload);
         }
-        closeBoardEditor();
+        await loadQuestionBoard({ preserveEditor: true });
+        closeBoardEditor({ restoreCard: false });
         const destination = BOARD_COLUMNS.find((column) => column.id === targetState)?.label || "its column";
         showOk(changed ? "Question details saved in " + destination + "." :
             targetState === originalState ? "Question returned to its previous column." : "Question moved to " + destination + ".");
-        await loadQuestionBoard();
     } catch (err) { showError(err.message); }
 }
 
