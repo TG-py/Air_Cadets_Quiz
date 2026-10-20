@@ -294,6 +294,7 @@ check("a deleted website issue cannot be deleted twice", status == 404, str(stat
 print("\n[42] board editor saves without stealing text selection")
 app_js = open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8").read()
 css = open(os.path.join(ROOT, "static", "style.css"), encoding="utf-8").read()
+html = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
 open_editor = app_js.split("function openBoardEditor(")[1].split("\nfunction cancelBoardEditor(")[0]
 check("editor text controls do not start a card drag",
       "pointerdown" in open_editor
@@ -317,6 +318,10 @@ check("closing the editor only restores a card when asked",
       "function closeBoardEditor({ restoreCard = true } = {})" in app_js
       and "if (restoreCard && editor.originalHost)" in app_js,
       "the stale editor card would be reinserted after a save")
+check("every element toggled inert exists on the page",
+      bool(re.findall(r'el\("([^"]+)"\)\.inert', app_js))
+      and all('id="%s"' % name in html for name in re.findall(r'el\("([^"]+)"\)\.inert', app_js)),
+      "a missing editor element would throw Cannot set properties of null")
 board_script = r"""
 const fs = require("fs");
 const src = fs.readFileSync(process.argv[2], "utf8");
