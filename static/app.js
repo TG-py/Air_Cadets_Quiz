@@ -2017,6 +2017,62 @@ async function cancelBoardEditor() {
     closeBoardEditor();
 }
 
+function updateBoardColumnCount(columnState) {
+    const column = document.querySelector('.question-board-column[data-board-state="' + columnState + '"]');
+    if (!column) return;
+    const count = column.querySelector('[data-count="' + columnState + '"]');
+    if (count) count.textContent = String(column.querySelectorAll(".board-question-card").length);
+}
+
+function stageBoardEditorDrop(targetState) {
+    const editor = state.boardEditor;
+    if (!editor) return;
+    const host = document.querySelector(
+        '.question-board-column[data-board-state="' + targetState + '"] .board-column-cards'
+    );
+    if (!host) return;
+    editor.dropPending = true;
+    el("board-editor-content").hidden = true;
+    el("board-editor-drop").hidden = false;
+    const preview = questionBoardCard({
+        ...editor.question,
+        question_text: el("board-edit-question").value.trim() || editor.question.question_text,
+        answer_text: el("board-edit-answer").value.trim(),
+        topic: el("board-edit-topic").value.trim() || editor.question.topic,
+        board_state: targetState,
+    });
+    preview.classList.add("board-card-pending");
+    preview.draggable = false;
+    preview.tabIndex = -1;
+    preview.setAttribute("aria-hidden", "true");
+    host.querySelector(".board-empty")?.remove();
+    host.appendChild(preview);
+    editor.optimisticCard = preview;
+    updateBoardColumnCount(targetState);
+}
+
+function restoreBoardEditorAfterDrop() {
+    const editor = state.boardEditor;
+    if (!editor) return;
+    editor.dropPending = false;
+    if (editor.optimisticCard) {
+        const host = editor.optimisticCard.parentElement;
+        editor.optimisticCard.remove();
+        editor.optimisticCard = null;
+        if (host && !host.querySelector(".board-question-card")) {
+            const empty = document.createElement("p");
+            empty.className = "board-empty";
+            empty.textContent = "No questions here.";
+            host.appendChild(empty);
+        }
+        updateBoardColumnCount(
+            host?.closest(".question-board-column")?.dataset.boardState
+        );
+    }
+    el("board-editor-content").hidden = false;
+    el("board-editor-drop").hidden = true;
+}
+
 function closeBoardEditor({ restoreCard = true } = {}) {
     if (!state.boardEditor) return;
     const editor = state.boardEditor;
@@ -2094,7 +2150,11 @@ async function loadQuestionBoard({ preserveEditor = false } = {}) {
                 questions.forEach((question) => host.appendChild(questionBoardCard(question)));
             }
         });
-    } catch (err) { showError(err.message); }
+    } catch (err) {
+        showError(err.message);
+        return false;
+    }
+    return true;
 }
 
 async function moveBoardQuestion(questionId, targetState, skipConfirmation) {
@@ -2143,7 +2203,7 @@ async function moveBoardQuestion(questionId, targetState, skipConfirmation) {
     } catch (err) { showError(err.message); }
 }
 
-async function saveBoardEditorAndMove(targetState) {
+async function saveBoardEditorAndMove(targetState, { fromDrop = false } = {}) {
     const editor = state.boardEditor;
     if (!editor) return;
     const question = editor.question;
@@ -2159,6 +2219,7 @@ async function saveBoardEditorAndMove(targetState) {
     }
     if (editor.isNew) {
         if (targetState === "reported") { showError("A new question cannot be moved to Reported without a user report."); return; }
+        if (fromDrop) stageBoardEditorDrop(targetState);
         try {
             const created = await api("/api/questions", { method: "POST", body: fields });
             question.id = created.id;
@@ -2177,10 +2238,16 @@ async function saveBoardEditorAndMove(targetState) {
                 question.board_state = moved.state;
                 applyIdentity(moved);
             }
-            await loadQuestionBoard({ preserveEditor: true });
+            if (!await loadQuestionBoard({ preserveEditor: true })) {
+                restoreBoardEditorAfterDrop();
+                return;
+            }
             closeBoardEditor({ restoreCard: false });
             showOk("New question added to " + (BOARD_COLUMNS.find((column) => column.id === targetState)?.label || "the board") + ".");
-        } catch (err) { showError(err.message); }
+        } catch (err) {
+            restoreBoardEditorAfterDrop();
+            showError(err.message);
+        }
         return;
     }
     const changed = fields.question_text !== question.question_text || fields.answer_text !== (question.answer_text || "") || fields.topic !== (question.topic || "");
@@ -2203,6 +2270,7 @@ async function saveBoardEditorAndMove(targetState) {
         });
         if (!confirmed) return;
     }
+    if (fromDrop) stageBoardEditorDrop(targetState);
     try {
         if (changed) await api("/api/admin/questions/" + question.id + "/edit", { method: "POST", body: fields });
         if (targetState !== "reported" && (targetState !== editor.originalState || changed || question.status === "pending" && targetState === "active")) {
@@ -2211,12 +2279,18 @@ async function saveBoardEditorAndMove(targetState) {
             });
             applyIdentity(payload);
         }
-        await loadQuestionBoard({ preserveEditor: true });
+        if (!await loadQuestionBoard({ preserveEditor: true })) {
+            restoreBoardEditorAfterDrop();
+            return;
+        }
         closeBoardEditor({ restoreCard: false });
         const destination = BOARD_COLUMNS.find((column) => column.id === targetState)?.label || "its column";
         showOk(changed ? "Question details saved in " + destination + "." :
             targetState === originalState ? "Question returned to its previous column." : "Question moved to " + destination + ".");
-    } catch (err) { showError(err.message); }
+    } catch (err) {
+        restoreBoardEditorAfterDrop();
+        showError(err.message);
+    }
 }
 
 async function rejectBoardSubmission(questionId) {
@@ -3362,14 +3436,14 @@ function bindEvents() {
             if (targetState === "reported") {
                 if (state.boardEditor && state.boardEditor.originalState === "reported" &&
                         state.boardDragged.card === state.boardEditor.card) {
-                    saveBoardEditorAndMove(targetState);
+                    saveBoardEditorAndMove(targetState, { fromDrop: true });
                     return;
                 }
                 showError("Questions enter Reported only when someone submits a report.");
                 return;
             }
             if (state.boardEditor && state.boardDragged.card === state.boardEditor.card) {
-                saveBoardEditorAndMove(targetState);
+                saveBoardEditorAndMove(targetState, { fromDrop: true });
             } else {
                 moveBoardQuestion(state.boardDragged.questionId, targetState);
             }

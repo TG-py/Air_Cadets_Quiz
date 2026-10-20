@@ -34,7 +34,7 @@ Practice draws from the same squadron-weighted pool as the main quiz. Practice a
 
 **Status: implemented.** Selecting text inside the expanded card's question, answer, topic, or action controls no longer starts a card drag, so normal text selection works. Dragging the card outside those controls still saves it to a column.
 
-Saving an edit now refreshes the board while the editor is still open, then removes the editor only after the refresh succeeds. This prevents a stale card from being restored after a move. If saving or refreshing fails, the editor stays open with the entered text so the admin can retry. Focus returns to the saved question's new card when it remains visible.
+Saving an edit now refreshes the board while the editor is still open, then removes the editor only after the refresh succeeds. This prevents a stale card from being restored after a move. Dropping the expanded card into a column immediately shows it in that column and returns the dashed edit box while the save completes. If saving or refreshing fails, the preview is removed and the editor reopens with the entered text so the admin can retry. Focus returns to the saved question's new card when it remains visible.
 
 ## Backend improvements
 
@@ -89,4 +89,4 @@ Admin practice reporting now mirrors the squadron reporting pages. **Overall pra
 
 ## Verification status
 
-The changes above are implemented and were checked with the repository's end-to-end suite on 20 October 2026. The runner completed all 446 checks with no failures, including the website issue API workflow, schema migration, page-switching cleanup, menu-based issue reporting, report deletion, in-page confirmations, the practice reveal flow, practice auto-save and grouped results, practice overall/trend reporting, Progress trends access checks, and question-board editor drag/save behaviour. The suite starts its own server and temporary database on port 8099. Interface assertions from the retired bank/review navigation were updated to match the current question-board design, and the suite now compiles and runs every registered case.
+The changes above are implemented and were checked with the repository's end-to-end suite on 20 October 2026. The runner completed all 449 checks with no failures, including the website issue API workflow, schema migration, page-switching cleanup, menu-based issue reporting, report deletion, in-page confirmations, the practice reveal flow, practice auto-save and grouped results, practice overall/trend reporting, Progress trends access checks, and question-board editor drag/save behaviour. The suite starts its own server and temporary database on port 8099. Interface assertions from the retired bank/review navigation were updated to match the current question-board design, and the suite now compiles and runs every registered case.

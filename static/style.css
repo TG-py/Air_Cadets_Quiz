@@ -377,6 +377,7 @@ body.answered-incorrect #question-text { padding-left: .85rem; border-left: 4px 
 .board-question-card:active { cursor: grabbing; }
 .board-question-card textarea, .board-question-card input, .board-question-card select, .board-question-card button { -webkit-user-drag: none; }
 .board-question-card.dragging { opacity: .45; }
+.board-question-card.board-card-pending { opacity: .55; pointer-events: none; }
 .board-card-topic { display: block; overflow: hidden; color: var(--muted); font: .58rem "DM Mono", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .board-card-question { margin: .2rem 0; color: var(--ink); font-size: .7rem; line-height: 1.3; overflow-wrap: anywhere; }
 .board-card-answer { margin: .2rem 0 0; padding-top: .2rem; color: var(--muted); border-top: 1px solid var(--line); font-size: .64rem; line-height: 1.3; overflow-wrap: anywhere; }

@@ -364,8 +364,10 @@ async function api(path, options) {
     return { state: options.body.state, counts: {} };
 }
 function applyIdentity() {}
+function restoreBoardEditorAfterDrop() { calls.push(["restore"]); }
 function closeBoardEditor(options) { calls.push(["close", options]); }
-async function loadQuestionBoard(options) { calls.push(["load", options]); }
+let failLoad = false;
+async function loadQuestionBoard(options) { calls.push(["load", options]); return !failLoad; }
 function showError(message) { calls.push(["error", message]); }
 function showOk(message) { calls.push(["ok", message]); }
 async function confirmAction() { return true; }
@@ -392,7 +394,21 @@ eval(grab("saveBoardEditorAndMove"));
         isNew: false,
     };
     await saveBoardEditorAndMove("archive");
-    console.log(JSON.stringify({ success, failure: calls }));
+    const failure = calls.slice();
+    calls.length = 0;
+    failEdit = false;
+    failLoad = true;
+    state.boardEditor = {
+        question: {
+            id: 7, question_text: "Old question", answer_text: "Old answer",
+            topic: "Old topic", status: "approved", board_state: "active",
+            ai_pending: false,
+        },
+        originalState: "active",
+        isNew: false,
+    };
+    await saveBoardEditorAndMove("archive");
+    console.log(JSON.stringify({ success, failure, refreshFailure: calls }));
 })();
 """
 board_path = os.path.join(ROOT, "static", "_board_save_check.js")
@@ -414,6 +430,7 @@ except (ValueError, IndexError):
     board_data = {}
 board_calls = board_data.get("success", [])
 board_failure = board_data.get("failure", [])
+board_refresh_failure = board_data.get("refreshFailure", [])
 check("editing and moving saves the fields and the destination",
       len(board_calls) >= 4
       and board_calls[0][:2] == ["api", "/api/admin/questions/7/edit"]
@@ -433,5 +450,22 @@ check("a failed save leaves the editor open for a retry",
       and any(call[0] == "error" for call in board_failure)
       and not any(call[0] in ("load", "close") for call in board_failure),
       board_out[:300])
+check("a failed board refresh also keeps the editor open",
+      len(board_refresh_failure) >= 4
+      and board_refresh_failure[2] == ["load", {"preserveEditor": True}]
+      and not any(call[0] == "close" for call in board_refresh_failure),
+      board_out[:300])
+check("dropping an open editor card stages it in the hovered column",
+      'saveBoardEditorAndMove(targetState, { fromDrop: true })' in app_js
+      and "function stageBoardEditorDrop(targetState)" in app_js
+      and "editor.dropPending = true" in app_js
+      and "optimisticCard" in app_js
+      and ".board-question-card.board-card-pending" in css,
+      "the card would not visibly enter the target column")
+check("the editor drop box returns while the move is saved",
+      'el("board-editor-content").hidden = true;' in app_js
+      and 'el("board-editor-drop").hidden = false;' in app_js
+      and "function restoreBoardEditorAfterDrop()" in app_js,
+      "the edit box would stay hidden after the drag")
     ''',
 }
