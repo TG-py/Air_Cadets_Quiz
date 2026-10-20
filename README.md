@@ -359,7 +359,8 @@ inject markup.
 The admin sets the staff/NCO password outright and can read it straight after
 setting it, but it is not kept in a readable form: only the scrypt hash and
 salt are stored, so a password cannot be recovered later by anyone, including
-the admin. If it is lost, set a new one.
+the admin. If it is lost, set a new one. Any signed-in account can change its
+own password from the menu.
 
 An earlier build of this app kept a readable copy in a `users.password_text`
 column. Starting a database with this version blanks and drops that column, so

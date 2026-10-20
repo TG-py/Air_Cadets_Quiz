@@ -208,7 +208,7 @@ function applyIdentity(payload) {
     el("main-nav").hidden = false;
     el("who").hidden = !signedIn;
     el("login-link").hidden = signedIn;
-    el("change-password-btn").hidden = !isAdmin;
+    el("change-password-btn").hidden = !signedIn;
     el("logout-btn").hidden = !signedIn;
 
     document.querySelectorAll(".staff-only").forEach((button) => {
