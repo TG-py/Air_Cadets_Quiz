@@ -25,7 +25,46 @@ CONTENT_SECURITY_POLICY = (
 )
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+ROLE_GUEST = "guest"
+ROLE_STAFF = "staff"
+ROLE_ADMIN = "admin"
 LOGGER = logging.getLogger("air_cadets_quiz.http")
+
+
+def read_static_text(relative_path):
+    with open(os.path.join(STATIC_DIR, relative_path), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def build_scripts(role):
+    scripts = ['<script src="/static/app-core.js"></script>']
+    if role in (ROLE_STAFF, ROLE_ADMIN):
+        scripts.append('<script src="/static/app-staff.js"></script>')
+    if role == ROLE_ADMIN:
+        scripts.append('<script src="/static/app-admin.js"></script>')
+    return "\n    ".join(scripts)
+
+
+def build_index(role):
+    staff = role in (ROLE_STAFF, ROLE_ADMIN)
+    admin = role == ROLE_ADMIN
+    learning = read_static_text(os.path.join("nav", "learning-public.html"))
+    learning = learning.replace(
+        "<!-- nav-staff -->",
+        read_static_text(os.path.join("nav", "learning-staff.html")) if staff else "",
+    )
+    replacements = {
+        "<!-- nav-learning -->": learning,
+        "<!-- nav-admin -->": read_static_text(os.path.join("nav", "admin.html")) if admin else "",
+        "<!-- views-public -->": read_static_text(os.path.join("views", "public.html")),
+        "<!-- views-staff -->": read_static_text(os.path.join("views", "staff.html")) if staff else "",
+        "<!-- views-admin -->": read_static_text(os.path.join("views", "admin.html")) if admin else "",
+        "<!-- scripts -->": build_scripts(role),
+    }
+    html = read_static_text("index.html")
+    for token, content in replacements.items():
+        html = html.replace(token, content)
+    return html
 
 
 class QuizHandler(BaseHTTPRequestHandler):
@@ -89,7 +128,39 @@ class QuizHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def send_static(self, path):
+    def current_user(self):
+        token = self.read_cookie_token()
+        if not token:
+            return None
+        with db.connection() as conn:
+            session = db.get_session(conn, token)
+            if not session or not session["user_id"]:
+                return None
+            user = db.get_user_by_id(conn, session["user_id"])
+            if not user or not user["active"]:
+                return None
+            return user
+
+    def current_role(self):
+        user = self.current_user()
+        if not user:
+            return ROLE_GUEST
+        if user["role"] == db.USER_ADMIN:
+            return ROLE_ADMIN
+        return ROLE_STAFF
+
+    def send_index(self):
+        body = build_index(self.current_role()).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Vary", "Cookie")
+        self.send_security_headers()
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def send_static(self, path, role_variant=False):
         relative_path = os.path.normpath(unquote(path)).lstrip("/\\")
         full_path = os.path.realpath(os.path.join(STATIC_DIR, relative_path))
         static_root = os.path.realpath(STATIC_DIR)
@@ -109,10 +180,27 @@ class QuizHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
-        self.send_header("Cache-Control", "no-cache")
+        if role_variant:
+            self.send_header("Vary", "Cookie")
+            self.send_header("Cache-Control", "no-store")
+        else:
+            self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
+
+    def send_asset(self, relative_path):
+        safe_path = os.path.normpath(unquote(relative_path)).lstrip("/\\")
+        if safe_path in ("index.html", "app.js", "views", "nav") or safe_path.startswith("views/") or safe_path.startswith("nav/"):
+            return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        if safe_path in ("app-staff.js", "app-admin.js"):
+            role = self.current_role()
+            if safe_path == "app-staff.js" and role not in (ROLE_STAFF, ROLE_ADMIN):
+                return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            if safe_path == "app-admin.js" and role != ROLE_ADMIN:
+                return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return self.send_static(safe_path, role_variant=True)
+        return self.send_static(safe_path)
 
     def read_body(self):
         # Once this runs the body is either read or the connection is closed,
@@ -209,9 +297,9 @@ class QuizHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if path == "/" or path == "/index.html":
-                return self.send_static("index.html")
+                return self.send_index()
             if path.startswith("/static/"):
-                return self.send_static(path[len("/static/"):])
+                return self.send_asset(path[len("/static/"):])
             if path == "/healthz":
                 try:
                     with db.connection() as conn:

@@ -370,7 +370,7 @@ console.log("EDITWIRING:" + /makeButton\("Edit", "", \(\) => editQuestion\(quest
         handle.write(bank_script)
     try:
         bank_out = subprocess.run(
-            ["node", bank_path, os.path.join(ROOT, "static", "app.js")],
+            ["node", bank_path, combined_app_path()],
             capture_output=True, text=True, timeout=60,
         ).stdout
     except (OSError, subprocess.SubprocessError):
@@ -482,8 +482,8 @@ check("a rename confirmation counts the questions it will move",
     42: r'''
 
 print("\n[39] combined AI question checks and proposal decisions")
-current_index = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
-current_js = open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8").read()
+current_index = index_source()
+current_js = app_source()
 check("reports and flagged updates share one page", 'id="view-checks"' in current_index
       and 'id="checks-prompt-btn"' in current_index)
 check("whole-bank AI check is removed", 'data-view="scan"' not in current_index

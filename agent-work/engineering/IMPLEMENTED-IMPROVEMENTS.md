@@ -8,11 +8,11 @@ This note records the improvements selected from the project review and their im
 
 **Status: implemented.** The Progress area now includes a separate **Progress trends** page that is visible only to admins. It shows weekly counts of correct, incorrect, and skipped answers for the last 12 weeks, alongside a weekly accuracy chart. Accuracy uses correct and incorrect answers; skipped answers are excluded. Weeks with fewer than five scored answers are omitted from the accuracy series to avoid presenting a very small sample as a reliable trend. The page explains this threshold.
 
-The browser view and chart rendering are in `static/index.html`, `static/app.js`, and `static/style.css`. Trend data is provided by the admin-only `/api/admin/progress-trends` endpoint in `api_admin.py`, registered through `api.py`.
+The browser view and chart rendering are in the role-composed `static/index.html` shell and partials, `static/app-admin.js`, and `static/style.css`. Trend data is provided by the admin-only `/api/admin/progress-trends` endpoint in `api_admin.py`, registered through `api.py`.
 
 ### G4 — Clear feedback during requests
 
-**Status: implemented.** The shared `api()` request wrapper in `static/app.js` marks the relevant action or form as busy while a request is pending, disables submit controls to prevent duplicate submissions, and shows a small spinner. It restores the prior disabled state after the request completes. The shared site banner continues to communicate request success and failure.
+**Status: implemented.** The shared `api()` request wrapper in `static/app-core.js` marks the relevant action or form as busy while a request is pending, disables submit controls to prevent duplicate submissions, and shows a small spinner. It restores the prior disabled state after the request completes. The shared site banner continues to communicate request success and failure.
 
 ### G5 — Keyboard and focus support
 
@@ -95,6 +95,10 @@ Admin practice reporting now mirrors the squadron reporting pages. **Overall pra
 
 **Status: implemented.** The agent notes are grouped under `agent-work/` by purpose — `product/`, `ui/`, and `engineering/` — with an index in `agent-work/README.md` and a root `AGENTS.md` entry point. The code map, API map, and change guidance moved out of the product guide into `engineering/ARCHITECTURE.md` so each note has one job. Documentation links were updated to the new paths.
 
+### Role-based frontend delivery
+
+**Status: implemented.** The browser client is split into `static/app-core.js` (shared and public), `static/app-staff.js` (squadron quiz), and `static/app-admin.js` (admin), with matching markup in `static/views/` and `static/nav/`. `webserver.py` composes `static/index.html` per request from the shell and partials, includes only the scripts the session's role can use, and returns 404 for staff/admin scripts or source partials the session may not access. Login and logout reload the page so the browser receives the correct bundle. The API access checks remain the security boundary; this change limits information exposure only.
+
 ## Verification status
 
-The changes above are implemented and were checked with the repository's end-to-end suite on 20 October 2026. The runner completed all 452 checks with no failures, including the website issue API workflow, schema migration, page-switching cleanup, menu-based issue reporting, report deletion, in-page confirmations, the practice reveal flow, practice auto-save and grouped results, practice overall/trend reporting, Progress trends access checks, question-board editor drag/save behaviour, and keep-alive handling after a rejected POST. The suite starts its own server and temporary database on port 8099. Interface assertions from the retired bank/review navigation were updated to match the current question-board design, and the suite now compiles and runs every registered case.
+The changes above are implemented and were checked with the repository's end-to-end suite on 20 October 2026. The runner completed all 478 checks with no failures, including the website issue API workflow, role-based frontend delivery, schema migration, page-switching cleanup, menu-based issue reporting, report deletion, in-page confirmations, the practice reveal flow, practice auto-save and grouped results, practice overall/trend reporting, Progress trends access checks, question-board editor drag/save behaviour, and keep-alive handling after a rejected POST. The suite starts its own server and temporary database on port 8099. Interface assertions from the retired bank/review navigation were updated to match the current question-board design, and the suite now compiles and runs every registered case.

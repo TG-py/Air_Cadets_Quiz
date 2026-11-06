@@ -1,0 +1,109 @@
+        <section class="view" id="view-login" hidden>
+            <h2>Log in</h2>
+            <form class="card form" id="login-form" autocomplete="on">
+                <label for="login-username">Username</label>
+                <input type="text" id="login-username" name="username" autocomplete="username" required>
+                <label for="login-password">Password</label>
+                <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+                <button type="submit" class="primary">Log in</button>
+            </form>
+            <p class="hint">Cadets do not need an account - use <strong>Submit a question</strong> instead.</p>
+        </section>
+
+        <section class="view practice-view" id="view-practice" hidden>
+            <h2>Practise questions <span class="practice-pill">SOLO PRACTICE</span></h2>
+            <p class="practice-notice">Solo practice - work through the same question bank on your own.</p>
+
+            <div id="practice-start">
+                <form class="card form" id="practice-start-form" autocomplete="on">
+                    <label for="practice-name">Your name</label>
+                    <input type="text" id="practice-name" maxlength="80" autocomplete="name" required
+                           placeholder="Enter your name to begin">
+                    <label for="practice-topic">Topic</label>
+                    <select id="practice-topic">
+                        <option value="">All topics</option>
+                    </select>
+                    <button type="submit" class="primary">Start practising</button>
+                </form>
+            </div>
+
+            <div id="practice-panel" hidden>
+                <div class="quiz-toolbar">
+                    <span class="muted" id="practice-who"></span>
+                    <span class="toolbar-spacer"></span>
+                    <span class="muted" id="practice-progress"></span>
+                    <button type="button" class="link-btn" id="practice-switch">Not you? Switch name</button>
+                </div>
+
+                <div class="card question-card practice-card">
+                    <div class="question-card-head">
+                        <p class="topic-tag" id="practice-topic-tag"></p>
+                        <div class="dots-wrap">
+                            <button type="button" class="dots-btn" id="practice-menu-btn"
+                                    aria-label="Question options" aria-controls="practice-menu" aria-expanded="false">&#8942;</button>
+                            <div class="dots-menu" id="practice-menu" hidden>
+                                <button type="button" id="practice-report-btn">Report incorrect question</button>
+                            </div>
+                        </div>
+                    </div>
+                    <h2 id="practice-question-text">Loading...</h2>
+                    <div class="answer-block" id="practice-answer-block" hidden>
+                        <p class="answer-label">Answer</p>
+                        <p id="practice-answer-text"></p>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button type="button" class="success" id="practice-correct-btn" hidden>Got it right</button>
+                    <button type="button" class="danger" id="practice-incorrect-btn" hidden>Got it wrong</button>
+                    <button type="button" class="secondary" id="practice-reveal-btn">Show answer</button>
+                    <button type="button" class="warn" id="practice-skip-btn">Skip</button>
+                    <button type="button" class="primary" id="practice-finish-btn">Finish practice</button>
+                </div>
+            </div>
+
+            <div class="card" id="practice-empty" hidden>
+                <h2 id="practice-empty-title">No questions to practise yet</h2>
+                <p class="muted" id="practice-empty-text"></p>
+                <div class="controls">
+                    <button type="button" class="primary" id="practice-empty-finish" hidden>Finish practice</button>
+                </div>
+            </div>
+
+            <div class="card" id="practice-summary" hidden>
+                <h2>Practice score</h2>
+                <p id="practice-summary-text"></p>
+                <p class="muted">Solo practice only - the squadron scoreboard is untouched.</p>
+                <div class="controls">
+                    <button type="button" class="primary" id="practice-restart">Practise again</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="view" id="view-submit" hidden>
+            <h2>Submit a question</h2>
+            <p class="hint">An instructor reviews every question before it joins the quiz. All four boxes are required.</p>
+            <form class="card form" id="submit-form">
+                <label for="submit-name">Your name</label>
+                <input type="text" id="submit-name" maxlength="80" autocomplete="name" required>
+                <label for="submit-question">Question</label>
+                <textarea id="submit-question" rows="4" maxlength="2000" required></textarea>
+                <label for="submit-answer">Answer</label>
+                <textarea id="submit-answer" rows="3" maxlength="2000" required></textarea>
+                <label for="submit-topic">Topic</label>
+                <select id="submit-topic" required></select>
+                <input type="text" id="submit-topic-new" maxlength="80" placeholder="Name of the new topic" hidden>
+                <button type="submit" class="primary">Send for review</button>
+            </form>
+        </section>
+
+        <section class="view" id="view-report-issue" hidden>
+            <h2>Report a website issue</h2>
+            <p class="hint text-box">Tell the admin team what went wrong or what could work better.</p>
+            <form class="card form" id="website-issue-form">
+                <label for="website-issue-title">Short title</label>
+                <input type="text" id="website-issue-title" maxlength="120" required>
+                <label for="website-issue-details">What happened?</label>
+                <textarea id="website-issue-details" rows="6" maxlength="3000" required></textarea>
+                <button type="submit" class="primary">Send report</button>
+            </form>
+        </section>
