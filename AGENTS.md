@@ -21,7 +21,7 @@ docker compose up -d           # container deployment
 ```
 
 `test_quiz.py` starts its own server and database, so it is safe to run at any
-time. Run it after changing behaviour; the suite currently has 478 checks.
+time. Run it after changing behaviour; the suite currently has 481 checks.
 
 Set `ADMIN_PASSWORD` to avoid a generated first-run admin password. Other
 settings are documented in the README.
