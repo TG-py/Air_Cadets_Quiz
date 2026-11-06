@@ -27,8 +27,8 @@ then open the note below that matches the task.
 - After a change, add or update a case in `tests/` and record accepted work in
   `engineering/IMPLEMENTED-IMPROVEMENTS.md`.
 - Treat older labels you may find in the README or hidden markup as historical.
-  Confirm current navigation and behaviour in `static/index.html` and
-  `static/app.js`.
+  Confirm current navigation and behaviour in the `static/index.html` shell,
+  `static/views/`, `static/nav/`, and the split `static/app-*.js` modules.
 
 ## Keeping these notes current
 

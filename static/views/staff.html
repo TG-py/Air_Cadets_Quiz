@@ -1,0 +1,70 @@
+        <section class="view" id="view-quiz" hidden>
+            <header class="page-heading">
+                <p class="eyebrow">Squadron knowledge check</p>
+                <h2>Ask the squadron</h2>
+                <p>One question at a time. Build confidence together.</p>
+            </header>
+            <div class="quiz-toolbar">
+                <label class="inline-label" for="quiz-topic">Topic</label>
+                <select id="quiz-topic">
+                    <option value="">All topics</option>
+                </select>
+                <span class="toolbar-spacer"></span>
+                <span class="muted" id="quiz-progress"></span>
+            </div>
+
+            <div id="quiz-panel">
+                <div class="card question-card">
+                    <div class="question-card-head">
+                        <p class="topic-tag" id="question-topic"></p>
+                        <div class="dots-wrap">
+                            <button type="button" class="dots-btn" id="question-menu-btn"
+                                    aria-label="Question options" aria-controls="question-menu" aria-expanded="false">&#8942;</button>
+                            <div class="dots-menu" id="question-menu" hidden>
+                                <button type="button" id="report-question-btn">Report incorrect question</button>
+                            </div>
+                        </div>
+                    </div>
+                    <h2 id="question-text">Loading...</h2>
+                    <div class="answer-block" id="answer-block" hidden>
+                        <p class="answer-label">Answer</p>
+                        <p id="answer-text"></p>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button type="button" class="success" id="correct-btn">Correct</button>
+                    <button type="button" class="danger" id="incorrect-btn">Incorrect</button>
+                    <button type="button" class="warn" id="skip-btn">Skip</button>
+                    <button type="button" class="primary" id="finish-btn">Finish</button>
+                </div>
+            </div>
+
+            <div class="card" id="quiz-empty" hidden>
+                <h2 id="quiz-empty-title">No questions to ask yet</h2>
+                <p class="muted" id="quiz-empty-text"></p>
+                <div class="controls">
+                    <button type="button" class="primary" id="quiz-empty-finish" hidden>Finish</button>
+                </div>
+            </div>
+
+            <div class="card" id="quiz-summary" hidden>
+                <h2>Session summary</h2>
+                <p id="summary-text"></p>
+                <div class="controls">
+                    <button type="button" class="primary" id="summary-restart">Ask another</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="view" id="view-password" hidden>
+            <h2>Change password</h2>
+            <form class="card form" id="password-form" autocomplete="off">
+                <label for="current-password">Current password</label>
+                <input type="password" id="current-password" autocomplete="current-password" required>
+                <label for="new-password">New password</label>
+                <input type="password" id="new-password" minlength="8" autocomplete="new-password" required>
+                <label for="confirm-password">Confirm new password</label>
+                <input type="password" id="confirm-password" minlength="8" autocomplete="new-password" required>
+                <button type="submit" class="primary">Change password</button>
+            </form>
+        </section>

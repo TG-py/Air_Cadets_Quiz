@@ -10,7 +10,11 @@ explains the product behaviour these modules implement.
 - SQLite for persistence, accessed through `db.py`.
 - Plain HTTP via `http.server.ThreadingHTTPServer`; static assets served from
   `static/`.
-- The browser client is vanilla JavaScript in `static/app.js`; no build step.
+- The browser client is vanilla JavaScript split into `static/app-core.js`
+  (shared and public), `static/app-staff.js` (squadron quiz), and
+  `static/app-admin.js` (admin). `webserver.py` composes `static/index.html`
+  from the shell plus `static/views/` and `static/nav/` partials, and only
+  includes the scripts the signed-in role may use. No build step.
 
 ## Module map
 
@@ -36,8 +40,9 @@ explains the product behaviour these modules implement.
 
 1. `webserver.QuizHandler.do_GET/do_POST/do_HEAD` set request state and call
    `dispatch(method)`.
-2. `dispatch` serves static files, `/healthz`, or, for `/api/*`, opens a pooled
-   `db.connection()` and calls `handle_api`.
+2. `dispatch` composes the role-specific index for `/`, serves gated static
+   files, handles `/healthz`, or, for `/api/*`, opens a pooled `db.connection()`
+   and calls `handle_api`.
 3. `handle_api` matches the first route in `api.COMPILED`, resolves the session
    and user from the cookie, enforces the route's access level, checks the CSRF
    header for non-GET requests, then reads the JSON body and calls the handler
@@ -66,6 +71,13 @@ Guest sessions are issued by `GET /api/auth/me` when no session exists. The
 browser hides role-specific controls, but the server gate is the security
 boundary; never rely on hiding a view.
 
+The server also limits what frontend code is delivered. Anonymous visitors get
+only the public views and `app-core.js`; staff/NCO sessions additionally get the
+quiz view and `app-staff.js`; admins get the admin views and `app-admin.js`.
+Requests for a role asset the session cannot use return 404, and the view/nav
+partials are never served directly. This reduces information exposure but does
+not replace the per-route access checks above.
+
 ## Route map
 
 `api.py` is the complete list with access labels; this groups it by feature.
@@ -85,7 +97,9 @@ boundary; never rely on hiding a view.
 | Website issues | `POST /api/website-issues` (`csrf`), `GET /api/admin/website-issues`, `POST /api/admin/website-issues/{id}/delete` (`admin`) |
 
 The exact request and response shapes live in the handlers. When behaviour
-changes, update the handler, `static/app.js`, and the matching test together.
+changes, update the handler, the matching browser module
+(`static/app-core.js`, `static/app-staff.js`, or `static/app-admin.js`), and the
+matching test together.
 
 ## Data model
 
@@ -150,7 +164,7 @@ when you change any of them.
 - **Change quiz selection:** edit `quiz.py` and confirm `build_pool` still
   matches the eligibility rules above.
 - **Change the board:** keep `board_state` in sync server-side and mirror the
-  change in `static/app.js` and the board cases in `tests/cases_interface.py`
+  change in `static/app-admin.js` and the board cases in `tests/cases_interface.py`
   and `tests/cases_questions.py`.
 - **Add a test:** append a new `SECTIONS` number to the relevant
   `tests/cases_*.py` module. Section numbers are unique and run in order, and

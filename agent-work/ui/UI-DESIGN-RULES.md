@@ -146,7 +146,7 @@ Use these as the default palette. Keep contrast strong and colour use consistent
 
 ## 11. Project implementation rules
 
-- Check the current `static/index.html`, `static/style.css`, and `static/app.js` before designing. The existing markup, data, and interaction code are authoritative; the mockup is a visual reference only.
+- Check the current `static/index.html` shell, `static/views/`, `static/nav/`, `static/style.css`, and the split `static/app-*.js` modules before designing. The existing markup, data, and interaction code are authoritative; the mockup is a visual reference only.
 - Prefer updating existing component styles and shared tokens. Consolidate obsolete declarations when practical instead of repeatedly appending conflicting override blocks.
 - Keep new styles tied to existing semantic components. Do not add markup or JavaScript behavior solely to imitate mockup-only content.
 - Avoid external font, image, or stylesheet dependencies. Use project assets or local system fallbacks that work under the app's Content Security Policy.

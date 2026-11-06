@@ -1,0 +1,25 @@
+            <div class="nav-section admin-only" hidden>
+                <p class="nav-section-label">Progress</p>
+                <details class="nav-group" id="squadron-progress-group">
+                    <summary class="nav-group-toggle">Squadron progress</summary>
+                    <div class="nav-submenu">
+                        <button type="button" class="nav-btn admin-only" data-view="stats" hidden>Squadron progress</button>
+                        <button type="button" class="nav-btn admin-only" id="progress-trends-nav" data-view="progress-trends" hidden>Progress trends</button>
+                        <button type="button" class="nav-btn admin-only" data-view="sessions" hidden>Quiz sessions</button>
+                    </div>
+                </details>
+                <details class="nav-group" id="practice-progress-group">
+                    <summary class="nav-group-toggle">Practice progress</summary>
+                    <div class="nav-submenu">
+                        <button type="button" class="nav-btn admin-only" data-view="practice-stats" hidden>Overall practice data</button>
+                        <button type="button" class="nav-btn admin-only" data-view="practice-trends" hidden>Practice trends</button>
+                        <button type="button" class="nav-btn admin-only" data-view="practice-results" hidden>Practice results</button>
+                    </div>
+                </details>
+            </div>
+            <div class="nav-section admin-only" hidden>
+                <p class="nav-section-label">Admin</p>
+                <button type="button" class="nav-btn admin-only" id="question-review-toggle" data-view="board" hidden aria-controls="view-board">All questions <span id="review-badge" class="badge" hidden>0</span></button>
+                <button type="button" class="nav-btn admin-only" id="website-issues-nav" data-view="website-issues" hidden>Website issue reports</button>
+                <button type="button" class="nav-btn admin-only" data-view="users" hidden>Staff/NCO accounts</button>
+            </div>

@@ -21,7 +21,7 @@ docker compose up -d           # container deployment
 ```
 
 `test_quiz.py` starts its own server and database, so it is safe to run at any
-time. Run it after changing behaviour; the suite currently has 452 checks.
+time. Run it after changing behaviour; the suite currently has 478 checks.
 
 Set `ADMIN_PASSWORD` to avoid a generated first-run admin password. Other
 settings are documented in the README.
@@ -42,7 +42,7 @@ auth.py           password hashing, sessions, CSRF, login throttling
 db.py             schema, migrations, connection pool, all SQL
 quiz.py           eligibility pool, weighting, selection
 import_questions.py  CSV/JSON importer
-static/           index.html, app.js, style.css, icons
+static/           index.html shell, views/, nav/, app-core.js, app-staff.js, app-admin.js, style.css, icons
 tests/            feature case modules run by test_quiz.py
 agent-work/       product, UI, and engineering notes for agents
 ```
@@ -65,7 +65,8 @@ Full module and request-lifecycle details:
 - AI output is untrusted: store/display as text and require explicit admin
   approval before applying it.
 - Preserve element IDs, state classes, and `hidden` attributes used by
-  `static/app.js`; they drive navigation, role gating, dialogs, and banners.
+  `static/app-core.js`, `static/app-staff.js`, and `static/app-admin.js`; they
+  drive navigation, role gating, dialogs, and banners.
 - If a handler may reject a request before reading its body, keep
   `dispatch`'s `consume_body()` drain in place. Unread bodies corrupt HTTP/1.1
   keep-alive connections (this caused the post-logout hang).
@@ -75,7 +76,8 @@ Full module and request-lifecycle details:
 ## How to change things
 
 - **API route:** add a handler in the matching `api_*.py`, register it in
-  `api.py`, update `static/app.js`, add a test.
+  `api.py`, update the matching browser module (`static/app-core.js`,
+  `static/app-staff.js`, or `static/app-admin.js`), add a test.
 - **Schema:** update `SCHEMA` and add an idempotent migration guarded by
   `PRAGMA user_version`; bump `SCHEMA_VERSION`. Never edit a released migration.
 - **Question state:** keep `board_state`, `status`, flags, and

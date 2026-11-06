@@ -9,6 +9,8 @@ import urllib.error
 import urllib.request
 import http.cookiejar
 
+from tests.ui_sources import index_source, app_source, combined_app_path
+
 BASE = "http://127.0.0.1:8099"
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(ROOT, "test_run.db")

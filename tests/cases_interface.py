@@ -3,12 +3,12 @@
 SECTIONS = {
     24: r'''
 print("\n[22] ask page and nav changes")
-index_html = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
+index_html = index_source()
 check("question stats removed from the ask view", "question-weights" not in index_html)
 check("selection priority no longer shown", "Selection priority" not in index_html)
 check("submit nav hidden for admins", "hide-for-admin" in index_html)
 
-app_js = open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8").read()
+app_js = app_source()
 check("admin is moved off the submit view", 'state.view === "submit"' in app_js)
 check("empty quiz heading has an id for the quiz code to update",
       'id="quiz-empty-title"' in index_html)
@@ -165,7 +165,7 @@ with open(dom_path, "w", encoding="utf-8") as handle:
     handle.write(dom_script)
 try:
     dom_out = subprocess.run(
-        ["node", dom_path, os.path.join(ROOT, "static", "app.js")],
+        ["node", dom_path, combined_app_path()],
         capture_output=True, text=True, timeout=60,
     ).stdout
 except (OSError, subprocess.SubprocessError):
@@ -216,9 +216,9 @@ check("the stacked-layout margin is cancelled inside the dialog row",
     ''',
     43: r'''
 print("\n[40] action feedback and keyboard accessibility")
-app_js = open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8").read()
+app_js = app_source()
 css = open(os.path.join(ROOT, "static", "style.css"), encoding="utf-8").read()
-index_html = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
+index_html = index_source()
 check("in-flight actions disable their control", "control.disabled = true" in app_js)
 check("busy actions expose their state", 'setAttribute("aria-busy", "true")' in app_js
       and 'button[aria-busy="true"]::after' in css)
@@ -292,9 +292,9 @@ check("a deleted website issue cannot be deleted twice", status == 404, str(stat
     ''',
     45: r'''
 print("\n[42] board editor saves without stealing text selection")
-app_js = open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8").read()
+app_js = app_source()
 css = open(os.path.join(ROOT, "static", "style.css"), encoding="utf-8").read()
-html = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
+html = index_source()
 open_editor = app_js.split("function openBoardEditor(")[1].split("\nfunction cancelBoardEditor(")[0]
 check("editor text controls do not start a card drag",
       "pointerdown" in open_editor
@@ -421,7 +421,7 @@ with open(board_path, "w", encoding="utf-8") as handle:
     handle.write(board_script)
 try:
     board_out = subprocess.run(
-        ["node", board_path, os.path.join(ROOT, "static", "app.js")],
+        ["node", board_path, combined_app_path()],
         capture_output=True, text=True, timeout=60,
     ).stdout.strip()
 except (OSError, subprocess.SubprocessError):

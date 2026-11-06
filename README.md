@@ -350,7 +350,7 @@ docker logs air-cadets-quiz
 | `quiz.py` | Weighting and random question selection |
 | `import_questions.py` | Command line importer |
 | `test_quiz.py`, `tests/` | End-to-end test runner and cases grouped by feature |
-| `static/` | Page, styles and browser code |
+| `static/` | Page shell, role-specific views/nav, split browser code, styles and icons |
 | `agent-work/` | Product, UI, and engineering notes for contributors and AI agents |
 | `AGENTS.md` | Orientation and working rules for AI agents |
 | `questions.db` | Created on first run |

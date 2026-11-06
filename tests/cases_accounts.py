@@ -342,7 +342,7 @@ loadUsers().then(() => {
         handle.write(users_dom)
     try:
         users_out = subprocess.run(
-            ["node", users_path, os.path.join(ROOT, "static", "app.js")],
+            ["node", users_path, combined_app_path()],
             capture_output=True, text=True, timeout=60,
         ).stdout
     except (OSError, subprocess.SubprocessError):
