@@ -310,6 +310,18 @@ check("editor fields opt out of native dragging",
       open_editor.count("control.draggable = false") >= 2
       and "-webkit-user-drag: none" in css,
       "form controls can still begin a native drag")
+check("the editor topic dropdown can create a new topic",
+      'newTopicOption.value = NEW_TOPIC' in open_editor
+      and 'newTopicOption.textContent = "+ Add a new topic..."' in open_editor
+      and 'topicNewInput.id = "board-edit-topic-new"' in open_editor
+      and "syncBoardTopicNew" in open_editor
+      and "topicNewInput.required = isNew" in open_editor,
+      "the editor dropdown only lists existing topics")
+check("saving resolves the typed new topic",
+      "function boardEditorTopicValue()" in app_js
+      and "topic: boardEditorTopicValue()" in app_js
+      and "boardEditorTopicValue() !== (editor.question.topic || \"\")" in app_js,
+      "a new topic name would not reach the save request")
 check("saving refreshes the board before removing the editor",
       app_js.count("loadQuestionBoard({ preserveEditor: true })") >= 2
       and app_js.count("closeBoardEditor({ restoreCard: false })") >= 2,
@@ -383,10 +395,27 @@ const BOARD_COLUMNS = [
     { id: "approval", label: "Approval" },
     { id: "archive", label: "Archive" },
 ];
-eval(grab("saveBoardEditorAndMove"));
+const NEW_TOPIC = "__new__";
+eval(grab("boardEditorTopicValue") + "\n" + grab("saveBoardEditorAndMove"));
 (async () => {
     await saveBoardEditorAndMove("archive");
     const success = calls.slice();
+    calls.length = 0;
+    values["board-edit-topic"] = NEW_TOPIC;
+    values["board-edit-topic-new"] = "Brand new topic";
+    state.boardEditor = {
+        question: {
+            id: 7, question_text: "Old question", answer_text: "Old answer",
+            topic: "Old topic", status: "approved", board_state: "active",
+            ai_pending: false,
+        },
+        originalState: "active",
+        isNew: false,
+    };
+    await saveBoardEditorAndMove("active");
+    const newTopic = calls.slice();
+    values["board-edit-topic"] = "New topic";
+    delete values["board-edit-topic-new"];
     calls.length = 0;
     failEdit = true;
     state.boardEditor = {
@@ -413,7 +442,7 @@ eval(grab("saveBoardEditorAndMove"));
         isNew: false,
     };
     await saveBoardEditorAndMove("archive");
-    console.log(JSON.stringify({ success, failure, refreshFailure: calls }));
+    console.log(JSON.stringify({ success, newTopic, failure, refreshFailure: calls }));
 })();
 """
 board_path = os.path.join(ROOT, "static", "_board_save_check.js")
@@ -434,6 +463,7 @@ try:
 except (ValueError, IndexError):
     board_data = {}
 board_calls = board_data.get("success", [])
+board_new_topic = board_data.get("newTopic", [])
 board_failure = board_data.get("failure", [])
 board_refresh_failure = board_data.get("refreshFailure", [])
 check("editing and moving saves the fields and the destination",
@@ -442,6 +472,11 @@ check("editing and moving saves the fields and the destination",
       and board_calls[0][2]["question_text"] == "New question"
       and board_calls[1][:2] == ["api", "/api/admin/questions/7/board-state"]
       and board_calls[1][2]["state"] == "archive",
+      board_out[:300])
+check("the editor saves a typed new topic name",
+      board_new_topic[:1] == [["api", "/api/admin/questions/7/edit",
+                               {"question_text": "New question", "answer_text": "New answer",
+                                "topic": "Brand new topic"}]],
       board_out[:300])
 check("the board refresh finishes before the editor closes",
       len(board_calls) >= 5

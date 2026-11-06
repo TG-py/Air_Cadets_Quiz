@@ -597,7 +597,8 @@ body.board-view-active #view-board .board-editor-drag-instruction { color: var(-
 body.board-view-active #view-board .board-editor-fields { display: grid; grid-template-columns: 1fr; gap: .2rem; min-width: 0; }
 body.board-view-active #view-board .board-editor-fields label { margin: .18rem 0 0; font-size: .68rem; }
 body.board-view-active #view-board .board-editor-fields textarea,
-body.board-view-active #view-board .board-editor-fields select { min-height: 34px; margin: 0; padding: .35rem .5rem; font-size: .76rem; }
+body.board-view-active #view-board .board-editor-fields select,
+body.board-view-active #view-board .board-editor-fields input[type="text"] { min-height: 34px; margin: 0; padding: .35rem .5rem; font-size: .76rem; }
 body.board-view-active #view-board #board-edit-question,
 body.board-view-active #view-board #board-edit-answer { min-height: 3.2rem; resize: vertical; }
 body.board-view-active #view-board .board-editor-details { min-width: 0; }
@@ -669,7 +670,8 @@ body.board-view-active #view-board .board-editor-actions button { min-height: 28
     body.board-view-active #view-board .board-editor-fields #board-edit-destination { display: block; }
     body.board-view-active #view-board .board-editor-fields .board-editor-mobile-save { display: block; }
     body.board-view-active #view-board .board-editor-fields textarea,
-    body.board-view-active #view-board .board-editor-fields select { min-height: 44px; padding: .55rem .65rem; font-size: 16px; }
+    body.board-view-active #view-board .board-editor-fields select,
+    body.board-view-active #view-board .board-editor-fields input[type="text"] { min-height: 44px; padding: .55rem .65rem; font-size: 16px; }
     body.board-view-active #view-board #board-edit-question,
     body.board-view-active #view-board #board-edit-answer { min-height: 6rem; }
     body.board-view-active #view-board .board-editor-reports { max-height: none; overflow: visible; }

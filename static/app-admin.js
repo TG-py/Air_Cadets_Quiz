@@ -1027,6 +1027,16 @@ function setBoardEditorState(question, card) {
     card.querySelector(".board-editor-actions").replaceChildren(actions);
 }
 
+function boardEditorTopicValue() {
+    const select = el("board-edit-topic");
+    if (!select) return "";
+    if (select.value === NEW_TOPIC) {
+        const input = el("board-edit-topic-new");
+        return input ? input.value.trim() : "";
+    }
+    return select.value.trim();
+}
+
 function openBoardEditor(question, card, options = {}) {
     if (state.boardEditor && state.boardEditor.card === card) return;
     if (state.boardEditor) {
@@ -1118,10 +1128,35 @@ function openBoardEditor(question, card, options = {}) {
         option.textContent = topic;
         topicSelect.appendChild(option);
     });
+    const newTopicOption = document.createElement("option");
+    newTopicOption.value = NEW_TOPIC;
+    newTopicOption.textContent = "+ Add a new topic...";
+    topicSelect.appendChild(newTopicOption);
     topicSelect.value = question.topic || availableTopics[0] || "";
     topicSelect.required = true;
-    fields.append(questionLabel, questionInput, answerLabel, answerInput, topicLabel, topicSelect);
-    [questionInput, answerInput, topicSelect].forEach((control) => {
+    const topicNewLabel = document.createElement("label");
+    topicNewLabel.htmlFor = "board-edit-topic-new";
+    topicNewLabel.textContent = "New topic";
+    topicNewLabel.hidden = true;
+    const topicNewInput = document.createElement("input");
+    topicNewInput.type = "text";
+    topicNewInput.id = "board-edit-topic-new";
+    topicNewInput.maxLength = 80;
+    topicNewInput.placeholder = "Name of the new topic";
+    topicNewInput.hidden = true;
+    const syncBoardTopicNew = () => {
+        const isNew = topicSelect.value === NEW_TOPIC;
+        topicNewLabel.hidden = !isNew;
+        topicNewInput.hidden = !isNew;
+        topicNewInput.required = isNew;
+        if (isNew) topicNewInput.focus();
+    };
+    topicSelect.addEventListener("change", syncBoardTopicNew);
+    fields.append(
+        questionLabel, questionInput, answerLabel, answerInput,
+        topicLabel, topicSelect, topicNewLabel, topicNewInput
+    );
+    [questionInput, answerInput, topicSelect, topicNewInput].forEach((control) => {
         control.draggable = false;
     });
 
@@ -1192,7 +1227,7 @@ async function cancelBoardEditor() {
     const changed = isNew ||
         el("board-edit-question").value.trim() !== editor.question.question_text ||
         el("board-edit-answer").value.trim() !== (editor.question.answer_text || "") ||
-        el("board-edit-topic").value.trim() !== (editor.question.topic || "");
+        boardEditorTopicValue() !== (editor.question.topic || "");
     if (changed) {
         const confirmed = await confirmAction({
             title: isNew ? "Discard this new question?" : "Discard unsaved changes?",
@@ -1225,7 +1260,7 @@ function stageBoardEditorDrop(targetState) {
         ...editor.question,
         question_text: el("board-edit-question").value.trim() || editor.question.question_text,
         answer_text: el("board-edit-answer").value.trim(),
-        topic: el("board-edit-topic").value.trim() || editor.question.topic,
+        topic: boardEditorTopicValue() || editor.question.topic,
         board_state: targetState,
     });
     preview.classList.add("board-card-pending");
@@ -1398,7 +1433,7 @@ async function saveBoardEditorAndMove(targetState, { fromDrop = false } = {}) {
     const fields = {
         question_text: el("board-edit-question").value.trim(),
         answer_text: el("board-edit-answer").value.trim(),
-        topic: el("board-edit-topic").value.trim(),
+        topic: boardEditorTopicValue(),
     };
     if (!fields.question_text || !fields.topic || (editor.isNew && !fields.answer_text)) {
         showError("A question and topic are required; new questions also need an answer.");
